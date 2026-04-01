@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ClawBot Platform</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
+</head>
+<body>
+  <!-- ===== Auth Screen ===== -->
+  <div id="auth-screen" class="screen active">
+    <div class="auth-container">
+      <div class="logo">🐾</div>
+      <h1>ClawBot Platform</h1>
+      <p class="subtitle">AI Assistant • Ollama Powered</p>
+      
+      <div class="auth-tabs">
+        <button class="tab active" onclick="showAuthTab('login')">Login</button>
+        <button class="tab" onclick="showAuthTab('signup')">Sign Up</button>
+      </div>
+
+      <form id="login-form" class="auth-form" onsubmit="handleLogin(event)">
+        <input type="email" id="login-email" placeholder="Email" required>
+        <input type="password" id="login-password" placeholder="Password" required>
+        <button type="submit" class="btn-primary">Login</button>
+      </form>
+
+      <form id="signup-form" class="auth-form hidden" onsubmit="handleSignup(event)">
+        <input type="email" id="signup-email" placeholder="Email" required>
+        <input type="password" id="signup-password" placeholder="Password" required>
+        <button type="submit" class="btn-primary">Create Account</button>
+      </form>
+
+      <button class="btn-ghost" onclick="skipAuth()">Continue without account →</button>
+      <div id="auth-error" class="error-msg hidden"></div>
+    </div>
+  </div>
+
+  <!-- ===== Main App ===== -->
+  <div id="app" class="screen">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <span class="logo-sm">🐾</span>
+        <span class="brand">ClawBot</span>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-item active" onclick="showPanel('chat')" data-panel="chat">
+          <span class="nav-icon">💬</span> Chat
+        </button>
+        <button class="nav-item" onclick="showPanel('models')" data-panel="models">
+          <span class="nav-icon">🧠</span> Models
+        </button>
+        <button class="nav-item" onclick="showPanel('skills')" data-panel="skills">
+          <span class="nav-icon">⚡</span> Skills
+        </button>
+        <button class="nav-item" onclick="showPanel('status')" data-panel="status">
+          <span class="nav-icon">📊</span> Status
+        </button>
+        <button class="nav-item" onclick="showPanel('settings')" data-panel="settings">
+          <span class="nav-icon">⚙️</span> Settings
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="user-info" id="user-info">
+          <span class="user-avatar">👤</span>
+          <span class="user-name" id="user-name">Guest</span>
+        </div>
+        <button class="btn-sm" onclick="logout()">Logout</button>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Chat Panel -->
+      <div id="panel-chat" class="panel active">
+        <div class="panel-header">
+          <h2>💬 Chat</h2>
+          <select id="model-select" class="model-dropdown">
+            <option value="llama3">llama3</option>
+            <option value="mistral">mistral</option>
+            <option value="phi3">phi3</option>
+            <option value="gemma">gemma</option>
+          </select>
+        </div>
+        <div class="chat-messages" id="chat-messages">
+          <div class="welcome-msg">
+            <h3>Welcome to ClawBot 🐾</h3>
+            <p>Start chatting with your AI assistant. Powered by Ollama + OpenClaw.</p>
+            <div class="quick-prompts">
+              <button class="chip" onclick="sendQuick('What models are available?')">Available models?</button>
+              <button class="chip" onclick="sendQuick('Show system status')">System status</button>
+              <button class="chip" onclick="sendQuick('What can you do?')">What can you do?</button>
+            </div>
+          </div>
+        </div>
+        <div class="chat-input-area">
+          <textarea id="chat-input" placeholder="Type your message..." rows="1" 
+            onkeydown="handleChatKey(event)"></textarea>
+          <button class="btn-send" onclick="sendMessage()" id="send-btn">Send</button>
+        </div>
+      </div>
+
+      <!-- Models Panel -->
+      <div id="panel-models" class="panel">
+        <div class="panel-header">
+          <h2>🧠 Models</h2>
+          <button class="btn-sm" onclick="refreshModels()">Refresh</button>
+        </div>
+        <div class="models-grid" id="models-grid">
+          <div class="loading">Loading models...</div>
+        </div>
+      </div>
+
+      <!-- Skills Panel -->
+      <div id="panel-skills" class="panel">
+        <div class="panel-header">
+          <h2>⚡ Skills</h2>
+        </div>
+        <div class="skills-list" id="skills-list">
+          <div class="skill-card">
+            <span class="skill-icon">🌤️</span>
+            <div class="skill-info">
+              <h4>Weather</h4>
+              <p>Current weather and forecasts</p>
+            </div>
+            <span class="skill-status active">Active</span>
+          </div>
+          <div class="skill-card">
+            <span class="skill-icon">📧</span>
+            <div class="skill-info">
+              <h4>Email</h4>
+              <p>Read and send emails</p>
+            </div>
+            <span class="skill-status">Available</span>
+          </div>
+          <div class="skill-card">
+            <span class="skill-icon">📅</span>
+            <div class="skill-info">
+              <h4>Calendar</h4>
+              <p>Manage events and reminders</p>
+            </div>
+            <span class="skill-status">Available</span>
+          </div>
+          <div class="skill-card">
+            <span class="skill-icon">🔍</span>
+            <div class="skill-info">
+              <h4>Web Search</h4>
+              <p>Search the web with Brave API</p>
+            </div>
+            <span class="skill-status active">Active</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Status Panel -->
+      <div id="panel-status" class="panel">
+        <div class="panel-header">
+          <h2>📊 System Status</h2>
+          <button class="btn-sm" onclick="refreshStatus()">Refresh</button>
+        </div>
+        <div class="status-grid" id="status-grid">
+          <div class="status-card">
+            <div class="status-indicator" id="status-ollama"></div>
+            <h4>Ollama</h4>
+            <p>Local AI Models</p>
+          </div>
+          <div class="status-card">
+            <div class="status-indicator" id="status-gateway"></div>
+            <h4>Gateway</h4>
+            <p>OpenClaw Gateway</p>
+          </div>
+          <div class="status-card">
+            <div class="status-indicator" id="status-supabase"></div>
+            <h4>Supabase</h4>
+            <p>Auth & Database</p>
+          </div>
+          <div class="status-card">
+            <div class="status-indicator online"></div>
+            <h4>Platform</h4>
+            <p id="uptime-display">Uptime: --</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings Panel -->
+      <div id="panel-settings" class="panel">
+        <div class="panel-header">
+          <h2>⚙️ Settings</h2>
+        </div>
+        <div class="settings-form">
+          <div class="setting-group">
+            <label>Ollama URL</label>
+            <input type="text" id="setting-ollama" value="http://localhost:11434">
+          </div>
+          <div class="setting-group">
+            <label>Gateway URL</label>
+            <input type="text" id="setting-gateway" value="http://localhost:9110">
+          </div>
+          <div class="setting-group">
+            <label>Default Model</label>
+            <select id="setting-model">
+              <option value="llama3">llama3</option>
+              <option value="mistral">mistral</option>
+              <option value="phi3">phi3</option>
+              <option value="gemma">gemma</option>
+            </select>
+          </div>
+          <div class="setting-group">
+            <label>System Prompt</label>
+            <textarea id="setting-system" rows="4" placeholder="You are a helpful AI assistant..."></textarea>
+          </div>
+          <button class="btn-primary" onclick="saveSettings()">Save Settings</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>
