@@ -3,14 +3,29 @@
 const API = window.location.origin;
 let authToken = localStorage.getItem('clawbot_token') || null;
 let currentUser = null;
+let currentChatId = null;
+let isStreaming = false;
+let isDarkTheme = localStorage.getItem('clawbot_theme') !== 'light';
 
 // ===== Init =====
 document.addEventListener('DOMContentLoaded', () => {
-  if (authToken) {
-    checkAuth();
-  }
+  applyTheme();
+  if (authToken) checkAuth();
   refreshStatus();
+  refreshModels();
 });
+
+// ===== Theme Toggle =====
+function toggleTheme() {
+  isDarkTheme = !isDarkTheme;
+  localStorage.setItem('clawbot_theme', isDarkTheme ? 'dark' : 'light');
+  applyTheme();
+}
+
+function applyTheme() {
+  document.body.classList.toggle('light-theme', !isDarkTheme);
+  document.getElementById('theme-btn').textContent = isDarkTheme ? '🌙' : '☀️';
+}
 
 // ===== Auth =====
 function showAuthTab(tab) {
@@ -83,6 +98,7 @@ function skipAuth() {
 function logout() {
   authToken = null;
   currentUser = null;
+  currentChatId = null;
   localStorage.removeItem('clawbot_token');
   document.getElementById('auth-screen').classList.add('active');
   document.getElementById('app').classList.remove('active');
@@ -96,6 +112,7 @@ function enterApp() {
   refreshModels();
   refreshStatus();
   loadSettings();
+  loadChatHistory();
 }
 
 function showAuthError(msg) {
@@ -111,6 +128,10 @@ function showPanel(name) {
   document.getElementById(`panel-${name}`).classList.add('active');
   document.querySelector(`[data-panel="${name}"]`).classList.add('active');
 
+  // Load data for panels
+  if (name === 'history') loadChatHistory();
+  if (name === 'analytics') loadAnalytics();
+
   // Close sidebar on mobile
   if (window.innerWidth <= 768) {
     document.querySelector('.sidebar').classList.remove('open');
@@ -118,26 +139,33 @@ function showPanel(name) {
   }
 }
 
-// ===== Chat =====
+// ===== Mobile Sidebar =====
+function toggleSidebar() {
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  sidebar.classList.toggle('open');
+  overlay.classList.toggle('show');
+}
+
+// ===== Streaming Chat =====
 async function sendMessage() {
   const input = document.getElementById('chat-input');
   const message = input.value.trim();
-  if (!message) return;
+  if (!message || isStreaming) return;
 
   const model = document.getElementById('model-select').value;
   input.value = '';
   input.style.height = 'auto';
 
   addMessage('user', message);
+  isStreaming = true;
+  document.getElementById('send-btn').disabled = true;
 
-  const btn = document.getElementById('send-btn');
-  btn.disabled = true;
-
-  // Show typing
-  const typingId = addTyping();
+  const botMsgId = addMessage('bot', '');
+  const botContent = document.querySelector(`#${botMsgId} .msg-content`);
 
   try {
-    const res = await fetch(`${API}/chat`, {
+    const res = await fetch(`${API}/chat/stream`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -145,68 +173,93 @@ async function sendMessage() {
       },
       body: JSON.stringify({ message, model }),
     });
-    const data = await res.json();
-    removeTyping(typingId);
 
-    if (data.error) {
-      addMessage('bot', `❌ Error: ${data.error}`);
-    } else {
-      addMessage('bot', data.response);
+    if (!res.ok) {
+      const errData = await res.json();
+      botContent.innerHTML = `<span class="error-text">❌ ${errData.error || 'Something went wrong'}</span>`;
+      isStreaming = false;
+      document.getElementById('send-btn').disabled = false;
+      return;
     }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let fullResponse = '';
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.error) {
+              botContent.innerHTML = `<span class="error-text">❌ ${data.error}</span>`;
+            } else if (data.content) {
+              fullResponse += data.content;
+              botContent.innerHTML = formatMessage(fullResponse);
+            }
+            if (data.done && data.skill) {
+              botContent.innerHTML += `<div class="skill-badge">⚡ ${data.skill}</div>`;
+            }
+          } catch {}
+        }
+      }
+
+      // Auto-scroll
+      const container = document.getElementById('chat-messages');
+      container.scrollTop = container.scrollHeight;
+    }
+
+    // Apply syntax highlighting
+    botContent.querySelectorAll('pre code').forEach(block => {
+      hljs.highlightElement(block);
+    });
+
+    // Save to history
+    saveChatMessage('user', message);
+    saveChatMessage('bot', fullResponse, model);
+
   } catch (err) {
-    removeTyping(typingId);
-    addMessage('bot', `❌ Connection error: ${err.message}`);
+    botContent.innerHTML = `<span class="error-text">❌ Connection error: ${err.message}</span>`;
   }
 
-  btn.disabled = false;
+  isStreaming = false;
+  document.getElementById('send-btn').disabled = false;
   input.focus();
 }
 
 function addMessage(role, content) {
   const container = document.getElementById('chat-messages');
-  // Remove welcome message if present
   const welcome = container.querySelector('.welcome-msg');
   if (welcome) welcome.remove();
 
+  const id = 'msg-' + Date.now();
   const div = document.createElement('div');
   div.className = `message ${role}`;
+  div.id = id;
   div.innerHTML = `
     <div class="msg-avatar">${role === 'user' ? '👤' : '🐾'}</div>
-    <div class="msg-content">${formatMessage(content)}</div>
-  `;
-  container.appendChild(div);
-  container.scrollTop = container.scrollHeight;
-}
-
-function formatMessage(text) {
-  // Basic markdown-like formatting
-  return text
-    .replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n/g, '<br>');
-}
-
-function addTyping() {
-  const container = document.getElementById('chat-messages');
-  const div = document.createElement('div');
-  const id = 'typing-' + Date.now();
-  div.id = id;
-  div.className = 'message bot';
-  div.innerHTML = `
-    <div class="msg-avatar">🐾</div>
-    <div class="msg-content">
-      <div class="typing-indicator"><span></span><span></span><span></span></div>
-    </div>
+    <div class="msg-content">${role === 'bot' && !content ? '<div class="typing-indicator"><span></span><span></span><span></span></div>' : formatMessage(content)}</div>
   `;
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
   return id;
 }
 
-function removeTyping(id) {
-  const el = document.getElementById(id);
-  if (el) el.remove();
+function formatMessage(text) {
+  if (!text) return '';
+  return text
+    .replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n/g, '<br>');
 }
 
 function handleChatKey(e) {
@@ -221,39 +274,275 @@ function sendQuick(text) {
   sendMessage();
 }
 
+function newChat() {
+  currentChatId = null;
+  const container = document.getElementById('chat-messages');
+  container.innerHTML = `
+    <div class="welcome-msg">
+      <h3>New Chat 🐾</h3>
+      <p>Start a fresh conversation</p>
+      <div class="quick-prompts">
+        <button class="chip" onclick="sendQuick('Objasni mi machine learning')">🤖 ML explain</button>
+        <button class="chip" onclick="sendQuick('Napravi mi todo app')">🚀 Build app</button>
+        <button class="chip" onclick="sendQuick('translate hello to German')">🌍 Translate</button>
+        <button class="chip" onclick="sendQuick('weather in Sarajevo')">🌤️ Weather</button>
+      </div>
+    </div>
+  `;
+}
+
+// ===== Voice Input/Output =====
+let recognition = null;
+let isListening = false;
+
+function toggleVoice() {
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    alert('Voice not supported in this browser. Try Chrome.');
+    return;
+  }
+
+  if (isListening) {
+    recognition.stop();
+    isListening = false;
+    document.getElementById('voice-btn').classList.remove('active');
+    return;
+  }
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SpeechRecognition();
+  recognition.lang = 'bs'; // Bosnian
+  recognition.interimResults = true;
+  recognition.continuous = false;
+
+  recognition.onresult = (event) => {
+    const transcript = Array.from(event.results).map(r => r[0].transcript).join('');
+    document.getElementById('chat-input').value = transcript;
+  };
+
+  recognition.onend = () => {
+    isListening = false;
+    document.getElementById('voice-btn').classList.remove('active');
+  };
+
+  recognition.onerror = () => {
+    isListening = false;
+    document.getElementById('voice-btn').classList.remove('active');
+  };
+
+  recognition.start();
+  isListening = true;
+  document.getElementById('voice-btn').classList.add('active');
+}
+
+// ===== File Upload =====
+function handleFileUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const content = e.target.result;
+    const input = document.getElementById('chat-input');
+
+    if (file.name.endsWith('.md')) {
+      // Skill or config file
+      input.value = `[Uploaded: ${file.name}]\n\n${content}`;
+    } else if (file.name.match(/\.(js|py|html|css|json|txt|csv)$/)) {
+      input.value = `Analyze this ${file.name}:\n\n\`\`\`\n${content}\n\`\`\``;
+    } else {
+      input.value = `[File uploaded: ${file.name}, ${(file.size / 1024).toFixed(1)}KB]`;
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+// ===== Chat History =====
+async function loadChatHistory() {
+  const list = document.getElementById('history-list');
+
+  if (!authToken) {
+    list.innerHTML = '<div class="loading">Login to sync chat history</div>';
+    // Load from localStorage
+    const local = JSON.parse(localStorage.getItem('clawbot_chats') || '[]');
+    if (local.length > 0) {
+      list.innerHTML = local.map(c => `
+        <div class="history-item" onclick="loadLocalChat('${c.id}')">
+          <h4>${c.title || 'Chat'}</h4>
+          <small>${new Date(c.created).toLocaleDateString()}</small>
+        </div>
+      `).join('');
+    }
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API}/chats`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    const data = await res.json();
+
+    if (!data.chats || data.chats.length === 0) {
+      list.innerHTML = '<div class="loading">No chat history yet</div>';
+      return;
+    }
+
+    list.innerHTML = data.chats.map(c => `
+      <div class="history-item" onclick="loadChat('${c.id}')">
+        <h4>${c.title || 'Chat'}</h4>
+        <small>${new Date(c.updated_at).toLocaleDateString()} • ${c.model || ''}</small>
+        <button class="btn-xs btn-danger" onclick="event.stopPropagation();deleteChat('${c.id}')">🗑️</button>
+      </div>
+    `).join('');
+  } catch {
+    list.innerHTML = '<div class="loading error">Failed to load history</div>';
+  }
+}
+
+async function loadChat(id) {
+  try {
+    const res = await fetch(`${API}/chats/${id}/messages`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    const data = await res.json();
+
+    currentChatId = id;
+    const container = document.getElementById('chat-messages');
+    container.innerHTML = '';
+
+    data.messages.forEach(msg => {
+      addMessage(msg.role, msg.content);
+    });
+
+    showPanel('chat');
+  } catch {}
+}
+
+async function saveChatMessage(role, content, model) {
+  // Save to localStorage
+  let chats = JSON.parse(localStorage.getItem('clawbot_chats') || '[]');
+  if (!currentChatId) {
+    currentChatId = 'local-' + Date.now();
+    chats.unshift({ id: currentChatId, title: content.substring(0, 50), created: Date.now() });
+    localStorage.setItem('clawbot_chats', JSON.stringify(chats.slice(0, 20)));
+  }
+
+  // Save to Supabase if logged in
+  if (authToken && currentChatId && !currentChatId.startsWith('local-')) {
+    fetch(`${API}/chats/${currentChatId}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ role, content, model }),
+    }).catch(() => {});
+  }
+}
+
+async function deleteChat(id) {
+  if (!confirm('Delete this chat?')) return;
+  await fetch(`${API}/chats/${id}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${authToken}` },
+  });
+  loadChatHistory();
+}
+
+// ===== Model Compare =====
+async function compareModels() {
+  const message = document.getElementById('compare-input').value.trim();
+  if (!message) return;
+
+  const results = document.getElementById('compare-results');
+  results.innerHTML = '<div class="loading">Comparing models...</div>';
+
+  try {
+    const res = await fetch(`${API}/chat/compare`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      },
+      body: JSON.stringify({ message }),
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      results.innerHTML = `<div class="error-msg">${data.error}</div>`;
+      return;
+    }
+
+    results.innerHTML = data.models.map(m => `
+      <div class="compare-card">
+        <h4>🧠 ${m.name} <span class="badge">${m.time}</span></h4>
+        <div class="compare-response">${formatMessage(m.response)}</div>
+      </div>
+    `).join('');
+
+    // Highlight code
+    results.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
+  } catch (err) {
+    results.innerHTML = `<div class="error-msg">${err.message}</div>`;
+  }
+}
+
+// ===== Analytics =====
+async function loadAnalytics() {
+  const grid = document.getElementById('analytics-grid');
+
+  try {
+    const res = await fetch(`${API}/analytics`);
+    const data = await res.json();
+
+    grid.innerHTML = `
+      <div class="stat-card">
+        <div class="stat-number">${data.messages}</div>
+        <div class="stat-label">Total Messages</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number">${data.unique_users}</div>
+        <div class="stat-label">Users</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number">${Math.floor(data.uptime_seconds / 60)}m</div>
+        <div class="stat-label">Uptime</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number">${data.is_admin ? '👑' : '👤'}</div>
+        <div class="stat-label">${data.is_admin ? 'Admin' : 'User'}</div>
+      </div>
+      ${data.top_skills.length ? `
+        <div class="stat-card wide">
+          <h4>Top Skills</h4>
+          ${data.top_skills.map(([name, count]) => `<div class="stat-row"><span>${name}</span><span>${count}</span></div>`).join('')}
+        </div>
+      ` : ''}
+      ${data.top_models.length ? `
+        <div class="stat-card wide">
+          <h4>Top Models</h4>
+          ${data.top_models.map(([name, count]) => `<div class="stat-row"><span>${name}</span><span>${count}</span></div>`).join('')}
+        </div>
+      ` : ''}
+    `;
+  } catch {
+    grid.innerHTML = '<div class="loading error">Failed to load analytics</div>';
+  }
+}
+
 // ===== Models =====
 async function refreshModels() {
-  const grid = document.getElementById('models-grid');
-  grid.innerHTML = '<div class="loading">Loading models...</div>';
-
   try {
     const res = await fetch(`${API}/models`);
     const data = await res.json();
 
-    if (!data.models?.length) {
-      grid.innerHTML = '<div class="loading">No models found. Run: ollama pull llama3</div>';
-      return;
-    }
+    if (!data.models?.length) return;
 
-    grid.innerHTML = data.models.map(m => `
-      <div class="model-card">
-        <h4>${m.name}</h4>
-        <p class="model-size">${formatSize(m.size)}</p>
-        <div class="model-meta">
-          <span>📅 ${formatDate(m.modified_at)}</span>
-          <span>🏷️ ${m.digest?.slice(0, 8) || '—'}</span>
-        </div>
-      </div>
-    `).join('');
-
-    // Update dropdown
     const select = document.getElementById('model-select');
     select.innerHTML = data.models.map(m =>
       `<option value="${m.name}">${m.name}</option>`
     ).join('');
-  } catch (err) {
-    grid.innerHTML = `<div class="loading">Error: ${err.message}</div>`;
-  }
+  } catch {}
 }
 
 // ===== Status =====
@@ -290,8 +579,7 @@ function saveSettings() {
     gateway_url: document.getElementById('setting-gateway').value,
     model: document.getElementById('setting-model').value,
     system_prompt: document.getElementById('setting-system').value,
-    provider: document.getElementById('setting-provider')?.value || 'groq',
-    theme: 'dark',
+    theme: isDarkTheme ? 'dark' : 'light',
   };
 
   fetch(`${API}/settings`, {
@@ -303,13 +591,10 @@ function saveSettings() {
     body: JSON.stringify(settings),
   })
     .then(res => res.json())
-    .then(data => {
-      alert(data.message || 'Settings saved!');
-    })
+    .then(data => alert(data.message || 'Settings saved!'))
     .catch(err => {
-      // Fallback to localStorage
       localStorage.setItem('clawbot_settings', JSON.stringify(settings));
-      alert('Saved locally (server error)');
+      alert('Saved locally');
     });
 }
 
@@ -320,54 +605,13 @@ async function loadSettings() {
     });
     const data = await res.json();
     const s = data.settings;
-
     if (s) {
       document.getElementById('setting-ollama').value = s.ollama_url || '';
       document.getElementById('setting-gateway').value = s.gateway_url || '';
       document.getElementById('setting-system').value = s.system_prompt || '';
-
-      // Set model if in dropdown
-      const modelSelect = document.getElementById('setting-model');
-      if (modelSelect && s.model) {
-        for (let opt of modelSelect.options) {
-          if (opt.value === s.model) { opt.selected = true; break; }
-        }
-      }
     }
-  } catch {
-    // Fallback to localStorage
-    const saved = localStorage.getItem('clawbot_settings');
-    if (saved) {
-      const s = JSON.parse(saved);
-      document.getElementById('setting-ollama').value = s.ollama || s.ollama_url || '';
-      document.getElementById('setting-gateway').value = s.gateway || s.gateway_url || '';
-      document.getElementById('setting-system').value = s.system || s.system_prompt || '';
-    }
-  }
+  } catch {}
 }
-
-// ===== Helpers =====
-function formatSize(bytes) {
-  if (!bytes) return 'Unknown';
-  const gb = bytes / (1024 ** 3);
-  return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(bytes / (1024 ** 2)).toFixed(0)} MB`;
-}
-
-function formatDate(dateStr) {
-  if (!dateStr) return '—';
-  return new Date(dateStr).toLocaleDateString();
-}
-
-// ===== Mobile Sidebar =====
-function toggleSidebar() {
-  const sidebar = document.querySelector('.sidebar');
-  const overlay = document.getElementById('sidebar-overlay');
-  sidebar.classList.toggle('open');
-  overlay.classList.toggle('show');
-}
-
-// Close sidebar when clicking a nav item on mobile
-const origShowPanel = window.showPanel;
 
 // ===== Skills Management =====
 async function refreshSkills() {
@@ -379,7 +623,7 @@ async function refreshSkills() {
     const data = await res.json();
 
     if (!data.skills || data.skills.length === 0) {
-      list.innerHTML = '<div class="loading">No skills installed. Click + Install to add one.</div>';
+      list.innerHTML = '<div class="loading">No skills installed</div>';
       return;
     }
 
@@ -388,20 +632,16 @@ async function refreshSkills() {
         <span class="skill-icon">${s.icon || '🔧'}</span>
         <div class="skill-info">
           <h4>${s.name}</h4>
-          <p>${s.description || 'No description'}</p>
-          ${s.triggers && s.triggers.length ? `<small class="triggers">Triggers: ${s.triggers.slice(0, 3).join(', ')}</small>` : ''}
+          <p>${s.description || ''}</p>
+          ${s.triggers?.length ? `<small class="triggers">${s.triggers.slice(0, 3).join(', ')}</small>` : ''}
         </div>
-        <div class="skill-actions">
-          <span class="skill-status active">Active</span>
-          ${s.id !== 'skills' && s.id !== 'upload' ? `<button class="btn-xs btn-danger" onclick="removeSkill('${s.id}')">🗑️</button>` : ''}
-        </div>
+        <span class="skill-status active">Active</span>
       </div>
     `).join('');
 
-    // Also load config
     loadConfig();
   } catch (err) {
-    list.innerHTML = `<div class="loading">Error: ${err.message}</div>`;
+    list.innerHTML = `<div class="loading error">${err.message}</div>`;
   }
 }
 
@@ -409,21 +649,13 @@ async function loadConfig() {
   try {
     const res = await fetch(`${API}/config`);
     const data = await res.json();
-
     document.getElementById('soul-status').textContent = data.soul?.loaded ? '✅ Loaded' : '❌ Not loaded';
     document.getElementById('memory-status').textContent = data.memory?.loaded ? '✅ Loaded' : '❌ Not loaded';
   } catch {}
 }
 
-// Install modal
-function showInstallModal() {
-  document.getElementById('install-modal').classList.remove('hidden');
-  document.getElementById('install-result').classList.add('hidden');
-}
-
-function hideInstallModal() {
-  document.getElementById('install-modal').classList.add('hidden');
-}
+function showInstallModal() { document.getElementById('install-modal').classList.remove('hidden'); }
+function hideInstallModal() { document.getElementById('install-modal').classList.add('hidden'); }
 
 function showInstallTab(tab) {
   document.querySelectorAll('.install-tab-content').forEach(el => el.classList.add('hidden'));
@@ -447,14 +679,10 @@ async function installSkillMd() {
       body: JSON.stringify({ content, filename: 'skill.md' }),
     });
     const data = await res.json();
-
-    if (data.success) {
-      resultEl.innerHTML = `<div class="success-msg">${data.message}</div>`;
-      document.getElementById('skill-md-input').value = '';
-      refreshSkills();
-    } else {
-      resultEl.innerHTML = `<div class="error-msg">❌ ${data.error}</div>`;
-    }
+    resultEl.innerHTML = data.success
+      ? `<div class="success-msg">${data.message}</div>`
+      : `<div class="error-msg">❌ ${data.error}</div>`;
+    if (data.success) { document.getElementById('skill-md-input').value = ''; refreshSkills(); }
   } catch (err) {
     resultEl.innerHTML = `<div class="error-msg">❌ ${err.message}</div>`;
   }
@@ -462,11 +690,11 @@ async function installSkillMd() {
 
 async function installSkillFromUrl() {
   const url = document.getElementById('skill-url-input').value.trim();
-  if (!url) return alert('Enter a URL first');
+  if (!url) return;
 
   const resultEl = document.getElementById('install-result');
   resultEl.classList.remove('hidden');
-  resultEl.innerHTML = '<div class="loading">Installing from URL...</div>';
+  resultEl.innerHTML = '<div class="loading">Installing...</div>';
 
   try {
     const res = await fetch(`${API}/upload/url`, {
@@ -475,109 +703,52 @@ async function installSkillFromUrl() {
       body: JSON.stringify({ url, type: 'skill' }),
     });
     const data = await res.json();
-
-    if (data.success) {
-      resultEl.innerHTML = `<div class="success-msg">${data.message}</div>`;
-      document.getElementById('skill-url-input').value = '';
-      refreshSkills();
-    } else {
-      resultEl.innerHTML = `<div class="error-msg">❌ ${data.error}</div>`;
-    }
+    resultEl.innerHTML = data.success
+      ? `<div class="success-msg">${data.message}</div>`
+      : `<div class="error-msg">❌ ${data.error}</div>`;
+    if (data.success) { document.getElementById('skill-url-input').value = ''; refreshSkills(); }
   } catch (err) {
     resultEl.innerHTML = `<div class="error-msg">❌ ${err.message}</div>`;
   }
 }
 
-async function searchSkills() {
-  const query = document.getElementById('skill-search-input').value.trim();
-  if (!query) return;
-
-  const resultsEl = document.getElementById('search-results');
-  resultsEl.innerHTML = '<div class="loading">Searching...</div>';
-
-  try {
-    const res = await fetch(`${API}/skills`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'search', query }),
-    });
-    const skillRes = await fetch(`${API}/skills/search`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'search', query }) });
-
-    // Use the skills endpoint directly
-    const data = await res.json();
-    resultsEl.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
-  } catch (err) {
-    resultsEl.innerHTML = `<div class="error-msg">${err.message}</div>`;
-  }
-}
-
-async function removeSkill(id) {
-  if (!confirm(`Remove skill '${id}'?`)) return;
-
-  try {
-    const res = await fetch(`${API}/skills/${id}`, { method: 'DELETE' });
-    const data = await res.json();
-    if (data.error) alert(data.error);
-    refreshSkills();
-  } catch (err) {
-    alert(err.message);
-  }
+function removeSkill(id) {
+  if (!confirm(`Remove '${id}'?`)) return;
+  fetch(`${API}/skills/${id}`, { method: 'DELETE' }).then(() => refreshSkills());
 }
 
 async function uploadSoul() {
   const content = document.getElementById('soul-input').value.trim();
-  if (!content) return alert('Write something first');
-
-  try {
-    const res = await fetch(`${API}/settings/soul`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-      },
-      body: JSON.stringify({ content }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      document.getElementById('soul-status').textContent = '✅ Loaded';
-      document.getElementById('soul-input').value = '';
-      alert(data.message);
-    }
-  } catch (err) {
-    alert(err.message);
-  }
+  if (!content) return;
+  const res = await fetch(`${API}/settings/soul`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
+    body: JSON.stringify({ content }),
+  });
+  const data = await res.json();
+  if (data.success) { document.getElementById('soul-status').textContent = '✅ Loaded'; document.getElementById('soul-input').value = ''; alert(data.message); }
 }
 
 async function uploadMemory() {
   const content = document.getElementById('memory-input').value.trim();
-  if (!content) return alert('Write something first');
-
-  try {
-    const res = await fetch(`${API}/settings/memory`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-      },
-      body: JSON.stringify({ content, append: true }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      document.getElementById('memory-status').textContent = '✅ Loaded';
-      document.getElementById('memory-input').value = '';
-      alert(data.message);
-    }
-  } catch (err) {
-    alert(err.message);
-  }
+  if (!content) return;
+  const res = await fetch(`${API}/settings/memory`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
+    body: JSON.stringify({ content, append: true }),
+  });
+  const data = await res.json();
+  if (data.success) { document.getElementById('memory-status').textContent = '✅ Loaded'; document.getElementById('memory-input').value = ''; alert(data.message); }
 }
 
-// Auto-load skills when panel opens
-document.addEventListener('DOMContentLoaded', () => {
-  // Override showPanel to load skills
-  const origShowPanel = window.showPanel;
-  window.showPanel = function(name) {
-    origShowPanel(name);
-    if (name === 'skills') refreshSkills();
-  };
-});
+// ===== Helpers =====
+function formatSize(bytes) {
+  if (!bytes) return 'Unknown';
+  const gb = bytes / (1024 ** 3);
+  return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(bytes / (1024 ** 2)).toFixed(0)} MB`;
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return '—';
+  return new Date(dateStr).toLocaleDateString();
+}

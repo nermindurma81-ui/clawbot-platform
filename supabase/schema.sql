@@ -123,6 +123,28 @@ CREATE POLICY "Users can manage own skills" ON public.user_skills
 CREATE POLICY "Users can manage own settings" ON public.user_settings
   FOR ALL USING (auth.uid() = user_id);
 
+-- ===== Shared Skills =====
+CREATE TABLE IF NOT EXISTS public.shared_skills (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
+  author TEXT,
+  name TEXT NOT NULL,
+  description TEXT,
+  content TEXT NOT NULL,
+  triggers TEXT[] DEFAULT '{}',
+  downloads INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.shared_skills ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Anyone can view shared skills" ON public.shared_skills
+  FOR SELECT USING (true);
+CREATE POLICY "Users can share their own skills" ON public.shared_skills
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can delete own shared skills" ON public.shared_skills
+  FOR DELETE USING (auth.uid() = user_id);
+
 -- ===== Functions =====
 
 -- Auto-create profile on signup

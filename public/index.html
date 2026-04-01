@@ -2,10 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>ClawBot Platform</title>
   <link rel="stylesheet" href="/css/style.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#0a0a0f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
+  <!-- Code highlighting -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 </head>
 <body>
   <!-- ===== Auth Screen ===== -->
@@ -58,14 +66,23 @@
         <button class="nav-item active" onclick="showPanel('chat')" data-panel="chat">
           <span class="nav-icon">💬</span> Chat
         </button>
+        <button class="nav-item" onclick="showPanel('history')" data-panel="history">
+          <span class="nav-icon">📜</span> History
+        </button>
         <button class="nav-item" onclick="showPanel('models')" data-panel="models">
           <span class="nav-icon">🧠</span> Models
+        </button>
+        <button class="nav-item" onclick="showPanel('compare')" data-panel="compare">
+          <span class="nav-icon">⚖️</span> Compare
         </button>
         <button class="nav-item" onclick="showPanel('skills')" data-panel="skills">
           <span class="nav-icon">⚡</span> Skills
         </button>
+        <button class="nav-item" onclick="showPanel('analytics')" data-panel="analytics">
+          <span class="nav-icon">📊</span> Analytics
+        </button>
         <button class="nav-item" onclick="showPanel('status')" data-panel="status">
-          <span class="nav-icon">📊</span> Status
+          <span class="nav-icon">💚</span> Status
         </button>
         <button class="nav-item" onclick="showPanel('settings')" data-panel="settings">
           <span class="nav-icon">⚙️</span> Settings
@@ -87,28 +104,70 @@
       <div id="panel-chat" class="panel active">
         <div class="panel-header">
           <h2>💬 Chat</h2>
-          <select id="model-select" class="model-dropdown">
-            <option value="llama3">llama3</option>
-            <option value="mistral">mistral</option>
-            <option value="phi3">phi3</option>
-            <option value="gemma">gemma</option>
-          </select>
+          <div class="header-actions">
+            <select id="model-select" class="model-dropdown">
+              <option value="llama-3.1-8b-instant">Llama 3.1 8B</option>
+              <option value="llama-3.1-70b-versatile">Llama 3.1 70B</option>
+            </select>
+            <button class="btn-sm" onclick="newChat()" title="New Chat">➕</button>
+            <button class="btn-sm" onclick="toggleTheme()" title="Theme" id="theme-btn">🌙</button>
+          </div>
         </div>
         <div class="chat-messages" id="chat-messages">
           <div class="welcome-msg">
             <h3>Welcome to ClawBot 🐾</h3>
-            <p>Start chatting with your AI assistant. Powered by Ollama + OpenClaw.</p>
+            <p>AI powered by Groq • Skills • Streaming</p>
             <div class="quick-prompts">
-              <button class="chip" onclick="sendQuick('What models are available?')">Available models?</button>
-              <button class="chip" onclick="sendQuick('Show system status')">System status</button>
-              <button class="chip" onclick="sendQuick('What can you do?')">What can you do?</button>
+              <button class="chip" onclick="sendQuick('Objasni mi machine learning')">🤖 ML explain</button>
+              <button class="chip" onclick="sendQuick('Napravi mi todo app')">🚀 Build app</button>
+              <button class="chip" onclick="sendQuick('translate hello to German')">🌍 Translate</button>
+              <button class="chip" onclick="sendQuick('weather in Sarajevo')">🌤️ Weather</button>
             </div>
           </div>
         </div>
         <div class="chat-input-area">
+          <input type="file" id="file-upload" hidden onchange="handleFileUpload(event)">
+          <button class="btn-icon" onclick="document.getElementById('file-upload').click()" title="Upload file">📎</button>
+          <button class="btn-icon" id="voice-btn" onclick="toggleVoice()" title="Voice input">🎤</button>
           <textarea id="chat-input" placeholder="Type your message..." rows="1" 
             onkeydown="handleChatKey(event)"></textarea>
-          <button class="btn-send" onclick="sendMessage()" id="send-btn">Send</button>
+          <button class="btn-send" onclick="sendMessage()" id="send-btn">➤</button>
+        </div>
+      </div>
+
+      <!-- History Panel -->
+      <div id="panel-history" class="panel">
+        <div class="panel-header">
+          <h2>📜 Chat History</h2>
+          <button class="btn-sm" onclick="loadChatHistory()">Refresh</button>
+        </div>
+        <div class="history-list" id="history-list">
+          <div class="loading">Login to see chat history</div>
+        </div>
+      </div>
+
+      <!-- Compare Panel -->
+      <div id="panel-compare" class="panel">
+        <div class="panel-header">
+          <h2>⚖️ Model Compare</h2>
+        </div>
+        <div class="compare-container">
+          <div class="compare-input">
+            <textarea id="compare-input" rows="3" placeholder="Enter a prompt to compare models..."></textarea>
+            <button class="btn-primary" onclick="compareModels()">Compare 8B vs 70B</button>
+          </div>
+          <div class="compare-results" id="compare-results"></div>
+        </div>
+      </div>
+
+      <!-- Analytics Panel -->
+      <div id="panel-analytics" class="panel">
+        <div class="panel-header">
+          <h2>📊 Analytics</h2>
+          <button class="btn-sm" onclick="loadAnalytics()">Refresh</button>
+        </div>
+        <div class="analytics-grid" id="analytics-grid">
+          <div class="loading">Loading analytics...</div>
         </div>
       </div>
 
