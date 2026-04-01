@@ -17,6 +17,8 @@ const CONFIG = {
   ollama: process.env.OLLAMA_URL || 'http://localhost:11434',
   supabaseUrl: process.env.SUPABASE_URL || '',
   supabaseKey: process.env.SUPABASE_ANON_KEY || '',
+  geminiKey: process.env.GEMINI_API_KEY || '',
+  defaultProvider: process.env.AI_PROVIDER || (process.env.GEMINI_API_KEY ? 'gemini' : 'ollama'),
 };
 
 // ===== Middleware =====
@@ -119,48 +121,119 @@ const gatewayProxy = createProxyMiddleware({
 });
 app.use('/api', gatewayProxy);
 
-// ===== Bot Chat Endpoint (direct Ollama) =====
+// ===== Gemini Chat Helper =====
+async function chatGemini(message, model, system) {
+  const geminiModel = model && model.startsWith('gemini') ? model : 'gemini-1.5-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${CONFIG.geminiKey}`;
+
+  const contents = [];
+  if (system) contents.push({ role: 'user', parts: [{ text: system }] });
+  contents.push({ role: 'user', parts: [{ text: message }] });
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000);
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contents }),
+    signal: controller.signal,
+  });
+  clearTimeout(timeout);
+
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message || 'Gemini error');
+
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response';
+  return { response: text, model: geminiModel, provider: 'gemini' };
+}
+
+// ===== Ollama Chat Helper =====
+async function chatOllama(message, model, system) {
+  const ollamaModel = model || 'tinyllama';
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 120000);
+
+  const ollamaRes = await fetch(`${CONFIG.ollama}/api/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: ollamaModel,
+      prompt: system ? `System: ${system}\n\nUser: ${message}\nAssistant:` : message,
+      stream: false,
+      options: { num_predict: 512 },
+    }),
+    signal: controller.signal,
+  });
+  clearTimeout(timeout);
+
+  const data = await ollamaRes.json();
+  if (data.error) throw new Error(data.error);
+
+  return {
+    response: data.response || 'No response',
+    model: data.model,
+    provider: 'ollama',
+    stats: { eval_count: data.eval_count, eval_duration: data.eval_duration },
+  };
+}
+
+// ===== Bot Chat Endpoint (auto-select provider) =====
 app.post('/chat', async (req, res) => {
-  const { message, model = 'llama3', system } = req.body;
+  const { message, model, system } = req.body;
   if (!message) return res.status(400).json({ error: 'Message required' });
 
+  const provider = req.body.provider || CONFIG.defaultProvider;
+
   try {
-    const ollamaRes = await fetch(`${CONFIG.ollama}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages: [
-          ...(system ? [{ role: 'system', content: system }] : []),
-          { role: 'user', content: message },
-        ],
-        stream: false,
-      }),
-    });
-    const data = await ollamaRes.json();
-    res.json({
-      response: data.message?.content || 'No response',
-      model: data.model,
-      done: data.done,
-      stats: {
-        eval_count: data.eval_count,
-        eval_duration: data.eval_duration,
-      },
-    });
+    let result;
+
+    if (provider === 'gemini' && CONFIG.geminiKey) {
+      result = await chatGemini(message, model, system);
+    } else {
+      // Try Ollama first, fall back to Gemini
+      try {
+        result = await chatOllama(message, model, system);
+      } catch (ollamaErr) {
+        console.log('Ollama failed, trying Gemini:', ollamaErr.message);
+        if (CONFIG.geminiKey) {
+          result = await chatGemini(message, model, system);
+        } else {
+          throw ollamaErr;
+        }
+      }
+    }
+
+    res.json(result);
   } catch (err) {
-    res.status(502).json({ error: 'Ollama chat failed', message: err.message });
+    if (err.name === 'AbortError') {
+      return res.status(504).json({ error: 'Request timed out' });
+    }
+    res.status(502).json({ error: 'Chat failed', message: err.message });
   }
 });
 
 // ===== Models Endpoint =====
 app.get('/models', async (req, res) => {
+  const models = [];
+
+  // Ollama models
   try {
-    const ollamaRes = await fetch(`${CONFIG.ollama}/api/tags`);
+    const ollamaRes = await fetch(`${CONFIG.ollama}/api/tags`, { signal: AbortSignal.timeout(5000) });
     const data = await ollamaRes.json();
-    res.json({ models: data.models || [] });
-  } catch (err) {
-    res.status(502).json({ error: 'Cannot fetch models', message: err.message });
+    if (data.models) models.push(...data.models);
+  } catch { /* Ollama offline */ }
+
+  // Gemini models (if configured)
+  if (CONFIG.geminiKey) {
+    models.push(
+      { name: 'gemini-1.5-flash', model: 'gemini-1.5-flash', provider: 'gemini', size: 0 },
+      { name: 'gemini-1.5-pro', model: 'gemini-1.5-pro', provider: 'gemini', size: 0 },
+    );
   }
+
+  res.json({ models });
 });
 
 // ===== Status =====
@@ -181,6 +254,10 @@ app.get('/status', async (req, res) => {
 
   // Check Supabase
   checks.supabase = supabase ? 'configured' : 'not configured';
+
+  // Check Gemini
+  checks.gemini = CONFIG.geminiKey ? 'configured' : 'not configured';
+  checks.provider = CONFIG.defaultProvider;
 
   res.json({
     name: 'ClawBot Platform',
