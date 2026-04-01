@@ -13,6 +13,12 @@
       "triggers": ["upload", "install soul", "set memory", "configure"],
       "description": "Upload skill.md, SOUL.md, MEMORY.md to configure the bot"
     },
+    "knowledge": {
+      "name": "Knowledge Engine",
+      "icon": "🧠",
+      "triggers": ["explain", "research", "analyze", "what is", "how does", "why", "compare", "objasni", "zašto"],
+      "description": "Deep knowledge — uses 70B model for complex questions"
+    },
     "vibe": {
       "name": "Vibe Coding",
       "icon": "🚀",

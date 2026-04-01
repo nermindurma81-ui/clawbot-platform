@@ -427,20 +427,23 @@ app.post('/chat', async (req, res) => {
     let result;
     const chatMessage = skillResult?.instructions ? skillResult.instructions : message;
 
+    // Skill can override model (e.g. knowledge uses 70B)
+    const chatModel = skillResult?.model || model;
+
     if (provider === 'groq' && CONFIG.groqKey) {
-      result = await chatGroq(chatMessage, model, enhancedSystem);
+      result = await chatGroq(chatMessage, chatModel, enhancedSystem);
     } else if (provider === 'gemini' && CONFIG.geminiKey) {
-      result = await chatGemini(chatMessage, model, enhancedSystem);
+      result = await chatGemini(chatMessage, chatModel, enhancedSystem);
     } else {
       // Try Ollama first, fall back to Groq then Gemini
       try {
-        result = await chatOllama(chatMessage, model, enhancedSystem);
+        result = await chatOllama(chatMessage, chatModel, enhancedSystem);
       } catch (ollamaErr) {
         console.log('Ollama failed:', ollamaErr.message);
         if (CONFIG.groqKey) {
-          result = await chatGroq(chatMessage, model, enhancedSystem);
+          result = await chatGroq(chatMessage, chatModel, enhancedSystem);
         } else if (CONFIG.geminiKey) {
-          result = await chatGemini(chatMessage, model, enhancedSystem);
+          result = await chatGemini(chatMessage, chatModel, enhancedSystem);
         } else {
           throw ollamaErr;
         }

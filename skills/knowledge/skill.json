@@ -1,0 +1,10 @@
+{
+  "id": "knowledge",
+  "name": "Knowledge Engine",
+  "version": "1.0.0",
+  "description": "Deep knowledge assistant — web search, code analysis, reasoning, multi-language",
+  "icon": "🧠",
+  "triggers": ["explain", "research", "analyze", "what is", "how does", "why", "compare", "objasni", "zašto", "kako", "šta je"],
+  "endpoint": "/skills/knowledge",
+  "method": "POST"
+}
