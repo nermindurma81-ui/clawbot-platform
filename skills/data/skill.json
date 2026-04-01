@@ -1,0 +1,10 @@
+{
+  "id": "data",
+  "name": "Data Analysis",
+  "icon": "📊",
+  "version": "1.0.0",
+  "description": "Analyze datasets, generate visualizations, statistical insights",
+  "triggers": ["data analysis", "analyze data", "dataset", "statistics", "visualization", "plot", "chart", "graf", "analiza"],
+  "endpoint": "/skills/data",
+  "method": "POST"
+}

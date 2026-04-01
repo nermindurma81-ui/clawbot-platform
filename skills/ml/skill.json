@@ -1,0 +1,10 @@
+{
+  "id": "ml",
+  "name": "ML Studio",
+  "icon": "🤖",
+  "version": "1.0.0",
+  "description": "Generate machine learning code — sklearn, TensorFlow, PyTorch, XGBoost",
+  "triggers": ["machine learning", "ml", "train model", "classification", "regression", "clustering", "neural network", "deep learning"],
+  "endpoint": "/skills/ml",
+  "method": "POST"
+}

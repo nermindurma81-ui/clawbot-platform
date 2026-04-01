@@ -19,6 +19,18 @@
       "triggers": ["explain", "research", "analyze", "what is", "how does", "why", "compare", "objasni", "zašto"],
       "description": "Deep knowledge — uses 70B model for complex questions"
     },
+    "ml": {
+      "name": "ML Studio",
+      "icon": "🤖",
+      "triggers": ["machine learning", "ml", "train model", "classification", "regression", "neural network"],
+      "description": "Generate ML code — sklearn, TensorFlow, PyTorch"
+    },
+    "data": {
+      "name": "Data Analysis",
+      "icon": "📊",
+      "triggers": ["data analysis", "analyze data", "dataset", "statistics", "visualization", "plot", "analiza"],
+      "description": "Analyze datasets, visualizations, statistical insights"
+    },
     "vibe": {
       "name": "Vibe Coding",
       "icon": "🚀",
