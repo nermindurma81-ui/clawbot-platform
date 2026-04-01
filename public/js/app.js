@@ -95,6 +95,7 @@ function enterApp() {
     currentUser?.email?.split('@')[0] || 'Guest';
   refreshModels();
   refreshStatus();
+  loadSettings();
 }
 
 function showAuthError(msg) {
@@ -279,13 +280,64 @@ function updateStatusIndicator(id, status) {
 // ===== Settings =====
 function saveSettings() {
   const settings = {
-    ollama: document.getElementById('setting-ollama').value,
-    gateway: document.getElementById('setting-gateway').value,
+    ollama_url: document.getElementById('setting-ollama').value,
+    gateway_url: document.getElementById('setting-gateway').value,
     model: document.getElementById('setting-model').value,
-    system: document.getElementById('setting-system').value,
+    system_prompt: document.getElementById('setting-system').value,
+    provider: document.getElementById('setting-provider')?.value || 'groq',
+    theme: 'dark',
   };
-  localStorage.setItem('clawbot_settings', JSON.stringify(settings));
-  alert('Settings saved! (Applied on next restart)');
+
+  fetch(`${API}/settings`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+    },
+    body: JSON.stringify(settings),
+  })
+    .then(res => res.json())
+    .then(data => {
+      alert(data.message || 'Settings saved!');
+    })
+    .catch(err => {
+      // Fallback to localStorage
+      localStorage.setItem('clawbot_settings', JSON.stringify(settings));
+      alert('Saved locally (server error)');
+    });
+}
+
+async function loadSettings() {
+  try {
+    const res = await fetch(`${API}/settings`, {
+      headers: { ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
+    });
+    const data = await res.json();
+    const s = data.settings;
+
+    if (s) {
+      document.getElementById('setting-ollama').value = s.ollama_url || '';
+      document.getElementById('setting-gateway').value = s.gateway_url || '';
+      document.getElementById('setting-system').value = s.system_prompt || '';
+
+      // Set model if in dropdown
+      const modelSelect = document.getElementById('setting-model');
+      if (modelSelect && s.model) {
+        for (let opt of modelSelect.options) {
+          if (opt.value === s.model) { opt.selected = true; break; }
+        }
+      }
+    }
+  } catch {
+    // Fallback to localStorage
+    const saved = localStorage.getItem('clawbot_settings');
+    if (saved) {
+      const s = JSON.parse(saved);
+      document.getElementById('setting-ollama').value = s.ollama || s.ollama_url || '';
+      document.getElementById('setting-gateway').value = s.gateway || s.gateway_url || '';
+      document.getElementById('setting-system').value = s.system || s.system_prompt || '';
+    }
+  }
 }
 
 // ===== Helpers =====
@@ -299,3 +351,216 @@ function formatDate(dateStr) {
   if (!dateStr) return '—';
   return new Date(dateStr).toLocaleDateString();
 }
+
+// ===== Skills Management =====
+async function refreshSkills() {
+  const list = document.getElementById('skills-list');
+  list.innerHTML = '<div class="loading">Loading skills...</div>';
+
+  try {
+    const res = await fetch(`${API}/skills`);
+    const data = await res.json();
+
+    if (!data.skills || data.skills.length === 0) {
+      list.innerHTML = '<div class="loading">No skills installed. Click + Install to add one.</div>';
+      return;
+    }
+
+    list.innerHTML = data.skills.map(s => `
+      <div class="skill-card">
+        <span class="skill-icon">${s.icon || '🔧'}</span>
+        <div class="skill-info">
+          <h4>${s.name}</h4>
+          <p>${s.description || 'No description'}</p>
+          ${s.triggers && s.triggers.length ? `<small class="triggers">Triggers: ${s.triggers.slice(0, 3).join(', ')}</small>` : ''}
+        </div>
+        <div class="skill-actions">
+          <span class="skill-status active">Active</span>
+          ${s.id !== 'skills' && s.id !== 'upload' ? `<button class="btn-xs btn-danger" onclick="removeSkill('${s.id}')">🗑️</button>` : ''}
+        </div>
+      </div>
+    `).join('');
+
+    // Also load config
+    loadConfig();
+  } catch (err) {
+    list.innerHTML = `<div class="loading">Error: ${err.message}</div>`;
+  }
+}
+
+async function loadConfig() {
+  try {
+    const res = await fetch(`${API}/config`);
+    const data = await res.json();
+
+    document.getElementById('soul-status').textContent = data.soul?.loaded ? '✅ Loaded' : '❌ Not loaded';
+    document.getElementById('memory-status').textContent = data.memory?.loaded ? '✅ Loaded' : '❌ Not loaded';
+  } catch {}
+}
+
+// Install modal
+function showInstallModal() {
+  document.getElementById('install-modal').classList.remove('hidden');
+  document.getElementById('install-result').classList.add('hidden');
+}
+
+function hideInstallModal() {
+  document.getElementById('install-modal').classList.add('hidden');
+}
+
+function showInstallTab(tab) {
+  document.querySelectorAll('.install-tab-content').forEach(el => el.classList.add('hidden'));
+  document.querySelectorAll('.install-tabs .tab').forEach(el => el.classList.remove('active'));
+  document.getElementById(`install-${tab}`).classList.remove('hidden');
+  event.target.classList.add('active');
+}
+
+async function installSkillMd() {
+  const content = document.getElementById('skill-md-input').value.trim();
+  if (!content) return alert('Paste skill.md content first');
+
+  const resultEl = document.getElementById('install-result');
+  resultEl.classList.remove('hidden');
+  resultEl.innerHTML = '<div class="loading">Installing...</div>';
+
+  try {
+    const res = await fetch(`${API}/upload/skill`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, filename: 'skill.md' }),
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      resultEl.innerHTML = `<div class="success-msg">${data.message}</div>`;
+      document.getElementById('skill-md-input').value = '';
+      refreshSkills();
+    } else {
+      resultEl.innerHTML = `<div class="error-msg">❌ ${data.error}</div>`;
+    }
+  } catch (err) {
+    resultEl.innerHTML = `<div class="error-msg">❌ ${err.message}</div>`;
+  }
+}
+
+async function installSkillFromUrl() {
+  const url = document.getElementById('skill-url-input').value.trim();
+  if (!url) return alert('Enter a URL first');
+
+  const resultEl = document.getElementById('install-result');
+  resultEl.classList.remove('hidden');
+  resultEl.innerHTML = '<div class="loading">Installing from URL...</div>';
+
+  try {
+    const res = await fetch(`${API}/upload/url`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, type: 'skill' }),
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      resultEl.innerHTML = `<div class="success-msg">${data.message}</div>`;
+      document.getElementById('skill-url-input').value = '';
+      refreshSkills();
+    } else {
+      resultEl.innerHTML = `<div class="error-msg">❌ ${data.error}</div>`;
+    }
+  } catch (err) {
+    resultEl.innerHTML = `<div class="error-msg">❌ ${err.message}</div>`;
+  }
+}
+
+async function searchSkills() {
+  const query = document.getElementById('skill-search-input').value.trim();
+  if (!query) return;
+
+  const resultsEl = document.getElementById('search-results');
+  resultsEl.innerHTML = '<div class="loading">Searching...</div>';
+
+  try {
+    const res = await fetch(`${API}/skills`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'search', query }),
+    });
+    const skillRes = await fetch(`${API}/skills/search`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'search', query }) });
+
+    // Use the skills endpoint directly
+    const data = await res.json();
+    resultsEl.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+  } catch (err) {
+    resultsEl.innerHTML = `<div class="error-msg">${err.message}</div>`;
+  }
+}
+
+async function removeSkill(id) {
+  if (!confirm(`Remove skill '${id}'?`)) return;
+
+  try {
+    const res = await fetch(`${API}/skills/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.error) alert(data.error);
+    refreshSkills();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function uploadSoul() {
+  const content = document.getElementById('soul-input').value.trim();
+  if (!content) return alert('Write something first');
+
+  try {
+    const res = await fetch(`${API}/settings/soul`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      },
+      body: JSON.stringify({ content }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      document.getElementById('soul-status').textContent = '✅ Loaded';
+      document.getElementById('soul-input').value = '';
+      alert(data.message);
+    }
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function uploadMemory() {
+  const content = document.getElementById('memory-input').value.trim();
+  if (!content) return alert('Write something first');
+
+  try {
+    const res = await fetch(`${API}/settings/memory`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      },
+      body: JSON.stringify({ content, append: true }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      document.getElementById('memory-status').textContent = '✅ Loaded';
+      document.getElementById('memory-input').value = '';
+      alert(data.message);
+    }
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+// Auto-load skills when panel opens
+document.addEventListener('DOMContentLoaded', () => {
+  // Override showPanel to load skills
+  const origShowPanel = window.showPanel;
+  window.showPanel = function(name) {
+    origShowPanel(name);
+    if (name === 'skills') refreshSkills();
+  };
+});

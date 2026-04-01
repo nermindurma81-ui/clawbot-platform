@@ -1,0 +1,15 @@
+{
+  "id": "coding",
+  "name": "Coding Agent",
+  "version": "1.0.0",
+  "description": "Write, execute, and debug code in multiple languages",
+  "icon": "💻",
+  "triggers": ["code", "program", "script", "debug", "write code", "fix code", "run", "execute"],
+  "endpoint": "/skills/coding",
+  "method": "POST",
+  "params": {
+    "task": "string - what you want to code",
+    "language": "string - programming language (js, python, bash, etc.)",
+    "code": "string - existing code to debug (optional)"
+  }
+}

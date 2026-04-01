@@ -5,11 +5,13 @@ require('dotenv').config();
 const express = require('express');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const http = require('http');
+const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const DATA_DIR = path.join(__dirname, 'data');
 
 // ===== Config =====
 const CONFIG = {
@@ -79,6 +81,138 @@ app.get('/auth/me', async (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
   res.json({ user: req.user });
 });
+
+// ===== Settings Sync (Supabase) =====
+// Get user settings
+app.get('/settings', async (req, res) => {
+  if (!supabase) return res.json({ settings: getLocalSettings() });
+  if (!req.user) return res.json({ settings: getLocalSettings() });
+
+  try {
+    const { data, error } = await supabase
+      .from('user_settings')
+      .select('*')
+      .eq('user_id', req.user.id)
+      .single();
+
+    if (error || !data) return res.json({ settings: getDefaultSettings() });
+    res.json({ settings: data.settings || getDefaultSettings() });
+  } catch {
+    res.json({ settings: getLocalSettings() });
+  }
+});
+
+// Save user settings
+app.post('/settings', async (req, res) => {
+  const settings = req.body;
+  if (!settings) return res.status(400).json({ error: 'No settings provided' });
+
+  // Always save locally
+  saveLocalSettings(settings);
+
+  // Sync to Supabase if authenticated
+  if (supabase && req.user) {
+    try {
+      const { error } = await supabase
+        .from('user_settings')
+        .upsert({
+          user_id: req.user.id,
+          settings,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' });
+
+      if (error) {
+        console.error('Supabase settings sync error:', error.message);
+        return res.json({ success: true, synced: false, message: 'Saved locally, Supabase sync failed' });
+      }
+      res.json({ success: true, synced: true, message: 'Settings saved & synced!' });
+    } catch (err) {
+      res.json({ success: true, synced: false, message: 'Saved locally, sync error: ' + err.message });
+    }
+  } else {
+    res.json({ success: true, synced: false, message: 'Saved locally (login to sync)' });
+  }
+});
+
+// Sync SOUL to Supabase
+app.post('/settings/soul', async (req, res) => {
+  const { content } = req.body;
+  if (!content) return res.status(400).json({ error: 'No content' });
+
+  // Save locally
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(path.join(DATA_DIR, 'soul.md'), content);
+  soulCache = content;
+
+  // Sync to Supabase
+  if (supabase && req.user) {
+    try {
+      await supabase.from('user_settings').upsert({
+        user_id: req.user.id,
+        settings: { soul: content },
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+    } catch {}
+  }
+
+  res.json({ success: true, message: '✅ SOUL saved!' });
+});
+
+// Sync MEMORY to Supabase
+app.post('/settings/memory', async (req, res) => {
+  const { content, append = true } = req.body;
+  if (!content) return res.status(400).json({ error: 'No content' });
+
+  // Save locally
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  const memoryPath = path.join(DATA_DIR, 'memory.md');
+  if (append && fs.existsSync(memoryPath)) {
+    fs.appendFileSync(memoryPath, '\n\n---\n\n' + content);
+  } else {
+    fs.writeFileSync(memoryPath, content);
+  }
+  memoryCache = fs.readFileSync(memoryPath, 'utf8');
+
+  // Sync to Supabase
+  if (supabase && req.user) {
+    try {
+      await supabase.from('user_settings').upsert({
+        user_id: req.user.id,
+        settings: { memory: memoryCache },
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+    } catch {}
+  }
+
+  res.json({ success: true, message: '✅ Memory saved & synced!' });
+});
+
+// Helper functions
+function getDefaultSettings() {
+  return {
+    model: 'llama-3.1-8b-instant',
+    provider: CONFIG.defaultProvider,
+    theme: 'dark',
+    ollama_url: CONFIG.ollama,
+    gateway_url: CONFIG.gateway,
+    system_prompt: '',
+    soul: '',
+    memory: '',
+  };
+}
+
+function getLocalSettings() {
+  const settingsPath = path.join(DATA_DIR, 'settings.json');
+  if (fs.existsSync(settingsPath)) {
+    return JSON.parse(fs.readFileSync(settingsPath));
+  }
+  return getDefaultSettings();
+}
+
+function saveLocalSettings(settings) {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(path.join(DATA_DIR, 'settings.json'), JSON.stringify(settings, null, 2));
+}
 
 // ===== Ollama Proxy =====
 const ollamaProxy = createProxyMiddleware({
@@ -209,7 +343,44 @@ async function chatOllama(message, model, system) {
   };
 }
 
-// ===== Bot Chat Endpoint (auto-select provider) =====
+// ===== Skill Auto-Detection =====
+function detectSkill(message) {
+  const lower = message.toLowerCase().trim();
+
+  for (const [id, skill] of Object.entries(loadedSkills)) {
+    if (!skill.triggers || skill.triggers.length === 0) continue;
+
+    for (const trigger of skill.triggers) {
+      if (lower.includes(trigger.toLowerCase())) {
+        // Extract params from message
+        const params = { task: message, action: 'default' };
+
+        // Parse common patterns
+        if (lower.includes('install')) params.action = 'install';
+        if (lower.includes('search')) params.action = 'search';
+        if (lower.includes('list')) params.action = 'list';
+        if (lower.includes('remove') || lower.includes('delete')) params.action = 'remove';
+        if (lower.includes('translate')) {
+          params.action = 'default';
+          // Try to detect target language
+          const langMatch = lower.match(/(?:to|na|u|in)\s+(\w+)/);
+          if (langMatch) params.to = langMatch[1];
+          params.text = message.replace(/translate|prevedi|to|na|u|in/gi, '').trim();
+        }
+        if (lower.includes('weather')) {
+          const cityMatch = lower.match(/(?:weather|forecast|temperatura).*?(?:in|u|for)\s+(\w+)/);
+          if (cityMatch) params.city = cityMatch[1];
+        }
+
+        return { id, params };
+      }
+    }
+  }
+
+  return null;
+}
+
+// ===== Bot Chat Endpoint (auto-select provider + skill routing) =====
 app.post('/chat', async (req, res) => {
   const { message, model, system } = req.body;
   if (!message) return res.status(400).json({ error: 'Message required' });
@@ -217,22 +388,59 @@ app.post('/chat', async (req, res) => {
   const provider = req.body.provider || CONFIG.defaultProvider;
 
   try {
+    // Build enhanced system prompt with SOUL + MEMORY
+    let enhancedSystem = system || '';
+    if (soulCache) {
+      enhancedSystem = `[Bot Personality - SOUL]\n${soulCache}\n\n${enhancedSystem}`;
+    }
+    if (memoryCache) {
+      enhancedSystem = `${enhancedSystem}\n\n[Memory - Context]\n${memoryCache.substring(0, 2000)}`;
+    }
+
+    // Auto-detect skill triggers
+    const matchedSkill = detectSkill(message);
+    let skillResult = null;
+
+    if (matchedSkill) {
+      const skill = loadedSkills[matchedSkill.id];
+      if (skill && skill.handler && skill.handler.run) {
+        try {
+          skillResult = await skill.handler.run(matchedSkill.params);
+          if (skillResult.instructions) {
+            // Skill wants LLM to process — add context to system prompt
+            enhancedSystem = `${enhancedSystem}\n\n[Skill: ${matchedSkill.id}]\n${skillResult.systemPrompt || ''}\n\nTask: ${skillResult.instructions}\n${skillResult.context ? 'Context: ' + skillResult.context : ''}`;
+          } else if (skillResult.response || skillResult.output || skillResult.translated) {
+            // Skill has direct answer — return it
+            return res.json({
+              response: skillResult.response || skillResult.output || skillResult.translated || JSON.stringify(skillResult, null, 2),
+              model: 'skill:' + matchedSkill.id,
+              provider: 'skill',
+              skill: matchedSkill.id,
+            });
+          }
+        } catch (skillErr) {
+          console.error(`Skill ${matchedSkill.id} error:`, skillErr.message);
+        }
+      }
+    }
+
     let result;
+    const chatMessage = skillResult?.instructions ? skillResult.instructions : message;
 
     if (provider === 'groq' && CONFIG.groqKey) {
-      result = await chatGroq(message, model, system);
+      result = await chatGroq(chatMessage, model, enhancedSystem);
     } else if (provider === 'gemini' && CONFIG.geminiKey) {
-      result = await chatGemini(message, model, system);
+      result = await chatGemini(chatMessage, model, enhancedSystem);
     } else {
       // Try Ollama first, fall back to Groq then Gemini
       try {
-        result = await chatOllama(message, model, system);
+        result = await chatOllama(chatMessage, model, enhancedSystem);
       } catch (ollamaErr) {
         console.log('Ollama failed:', ollamaErr.message);
         if (CONFIG.groqKey) {
-          result = await chatGroq(message, model, system);
+          result = await chatGroq(chatMessage, model, enhancedSystem);
         } else if (CONFIG.geminiKey) {
-          result = await chatGemini(message, model, system);
+          result = await chatGemini(chatMessage, model, enhancedSystem);
         } else {
           throw ollamaErr;
         }
@@ -311,6 +519,244 @@ app.get('/status', async (req, res) => {
     timestamp: new Date().toISOString(),
   });
 });
+
+// ===== Dynamic Skills Loader =====
+const SKILLS_DIR = path.join(__dirname, 'skills');
+const loadedSkills = {};
+
+function loadSingleSkill(dirName) {
+  const skillPath = path.join(SKILLS_DIR, dirName, 'index.js');
+  const metaPath = path.join(SKILLS_DIR, dirName, 'skill.json');
+  if (!fs.existsSync(skillPath)) return false;
+
+  try {
+    // Clear require cache for hot-reload
+    delete require.cache[require.resolve(skillPath)];
+    const skill = require(skillPath);
+    const meta = fs.existsSync(metaPath) ? JSON.parse(fs.readFileSync(metaPath)) : {};
+    loadedSkills[dirName] = { ...meta, handler: skill };
+    console.log(`  ✅ Skill loaded: ${meta.name || dirName}`);
+    return true;
+  } catch (err) {
+    console.error(`  ❌ Skill failed: ${dirName} - ${err.message}`);
+    return false;
+  }
+}
+
+function loadSkills() {
+  if (!fs.existsSync(SKILLS_DIR)) return;
+  const dirs = fs.readdirSync(SKILLS_DIR, { withFileTypes: true })
+    .filter(d => d.isDirectory());
+
+  for (const dir of dirs) {
+    loadSingleSkill(dir.name);
+  }
+}
+
+loadSkills();
+
+// Hot-reload endpoint — install + activate without restart
+app.post('/skills/reload/:id', (req, res) => {
+  const success = loadSingleSkill(req.params.id);
+  if (success) {
+    res.json({ success: true, loaded: req.params.id, skill: loadedSkills[req.params.id] ? {
+      name: loadedSkills[req.params.id].name,
+      description: loadedSkills[req.params.id].description,
+    } : null });
+  } else {
+    res.status(404).json({ error: `Failed to load skill '${req.params.id}'` });
+  }
+});
+
+// Reload all skills
+app.post('/skills/reload', (req, res) => {
+  const before = Object.keys(loadedSkills).length;
+  // Clear all from loadedSkills
+  Object.keys(loadedSkills).forEach(k => delete loadedSkills[k]);
+  // Clear require cache for all skills
+  Object.keys(require.cache).forEach(key => {
+    if (key.includes(SKILLS_DIR)) delete require.cache[key];
+  });
+  loadSkills();
+  const after = Object.keys(loadedSkills).length;
+  res.json({ success: true, before, after, skills: Object.keys(loadedSkills) });
+});
+
+// List all skills
+app.get('/skills', (req, res) => {
+  const skills = Object.entries(loadedSkills).map(([id, s]) => ({
+    id,
+    name: s.name || id,
+    description: s.description || '',
+    icon: s.icon || '🔧',
+    triggers: s.triggers || [],
+  }));
+  res.json({ skills });
+});
+
+// Run a skill
+app.post('/skills/:id', async (req, res) => {
+  const skill = loadedSkills[req.params.id];
+  if (!skill) return res.status(404).json({ error: `Skill '${req.params.id}' not found` });
+
+  try {
+    const result = await skill.handler.run(req.body);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete a skill
+app.delete('/skills/:id', (req, res) => {
+  const id = req.params.id;
+  const protectedSkills = ['skills', 'upload'];
+  if (protectedSkills.includes(id)) {
+    return res.status(403).json({ error: `'${id}' is a core skill. Cannot remove.` });
+  }
+
+  const targetDir = path.join(SKILLS_DIR, id);
+  if (!fs.existsSync(targetDir)) {
+    return res.status(404).json({ error: `Skill '${id}' not found` });
+  }
+
+  fs.rmSync(targetDir, { recursive: true });
+  delete loadedSkills[id];
+
+  // Remove from registry
+  const registryPath = path.join(SKILLS_DIR, 'brain', 'skills-registry.json');
+  if (fs.existsSync(registryPath)) {
+    try {
+      const registry = JSON.parse(fs.readFileSync(registryPath));
+      if (registry.skills) {
+        delete registry.skills[id];
+        fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2));
+      }
+    } catch {}
+  }
+
+  res.json({ success: true, removed: id });
+});
+
+// ===== File Upload Endpoints =====
+
+// Upload skill.md via raw text body
+app.post('/upload/skill', (req, res) => {
+  const { content, filename } = req.body;
+  if (!content) return res.status(400).json({ error: 'No content provided' });
+
+  const uploadSkill = loadedSkills['upload'];
+  if (!uploadSkill) return res.status(500).json({ error: 'Upload skill not loaded' });
+
+  uploadSkill.handler.installSkillMd(content, filename || 'skill.md')
+    .then(result => res.json(result))
+    .catch(err => res.status(500).json({ error: err.message }));
+});
+
+// Upload SOUL.md
+app.post('/upload/soul', (req, res) => {
+  const { content } = req.body;
+  if (!content) return res.status(400).json({ error: 'No content provided' });
+
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(path.join(DATA_DIR, 'soul.md'), content);
+  soulCache = content; // Update in-memory cache
+
+  res.json({ success: true, message: '✅ SOUL.md installed — bot personality updated!' });
+});
+
+// Upload MEMORY.md
+app.post('/upload/memory', (req, res) => {
+  const { content, append = true } = req.body;
+  if (!content) return res.status(400).json({ error: 'No content provided' });
+
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  const memoryPath = path.join(DATA_DIR, 'memory.md');
+
+  if (append && fs.existsSync(memoryPath)) {
+    fs.appendFileSync(memoryPath, '\n\n---\n\n' + content);
+  } else {
+    fs.writeFileSync(memoryPath, content);
+  }
+
+  memoryCache = fs.readFileSync(memoryPath, 'utf8'); // Update cache
+
+  res.json({ success: true, message: '✅ Memory updated!' });
+});
+
+// Get current config
+app.get('/config', (req, res) => {
+  const soul = soulCache ? soulCache.substring(0, 300) : null;
+  const memory = memoryCache ? memoryCache.substring(0, 300) : null;
+  const skillCount = Object.keys(loadedSkills).length;
+
+  res.json({
+    soul: soul ? { loaded: true, preview: soul + '...' } : { loaded: false },
+    memory: memory ? { loaded: true, preview: memory + '...' } : { loaded: false },
+    skills: { loaded: skillCount, names: Object.keys(loadedSkills) },
+    provider: CONFIG.defaultProvider,
+    groq: !!CONFIG.groqKey,
+    gemini: !!CONFIG.geminiKey,
+  });
+});
+
+// Install from URL
+app.post('/upload/url', async (req, res) => {
+  const { url, type } = req.body;
+  if (!url) return res.status(400).json({ error: 'No URL provided' });
+
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    const content = await response.text();
+
+    let detectedType = type;
+    if (!detectedType) {
+      if (url.includes('SOUL') || url.includes('soul')) detectedType = 'soul';
+      else if (url.includes('MEMORY') || url.includes('memory')) detectedType = 'memory';
+      else detectedType = 'skill';
+    }
+
+    if (detectedType === 'soul') {
+      if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(path.join(DATA_DIR, 'soul.md'), content);
+      soulCache = content;
+      res.json({ success: true, type: 'soul', message: '✅ SOUL installed from URL!' });
+    } else if (detectedType === 'memory') {
+      if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+      const memoryPath = path.join(DATA_DIR, 'memory.md');
+      if (fs.existsSync(memoryPath)) {
+        fs.appendFileSync(memoryPath, '\n\n---\n\n' + content);
+      } else {
+        fs.writeFileSync(memoryPath, content);
+      }
+      memoryCache = fs.readFileSync(memoryPath, 'utf8');
+      res.json({ success: true, type: 'memory', message: '✅ Memory updated from URL!' });
+    } else {
+      const uploadSkill = loadedSkills['upload'];
+      if (!uploadSkill) return res.status(500).json({ error: 'Upload skill not loaded' });
+      const result = await uploadSkill.handler.installSkillMd(content, 'skill.md');
+      res.json(result);
+    }
+  } catch (err) {
+    res.status(500).json({ error: `Failed to fetch URL: ${err.message}` });
+  }
+});
+
+// ===== SOUL & MEMORY Loading =====
+let soulCache = null;
+let memoryCache = null;
+
+// Load on startup
+const soulPath = path.join(DATA_DIR, 'soul.md');
+const memoryPath = path.join(DATA_DIR, 'memory.md');
+if (fs.existsSync(soulPath)) {
+  soulCache = fs.readFileSync(soulPath, 'utf8');
+  console.log('  💫 SOUL loaded:', soulCache.substring(0, 50) + '...');
+}
+if (fs.existsSync(memoryPath)) {
+  memoryCache = fs.readFileSync(memoryPath, 'utf8');
+  console.log('  🧠 Memory loaded:', memoryCache.length, 'chars');
+}
 
 // ===== SPA Fallback =====
 app.get('*', (req, res) => {

@@ -1,0 +1,15 @@
+{
+  "id": "translator",
+  "name": "Translator",
+  "version": "1.0.0",
+  "description": "Translate text between languages using LibreTranslate",
+  "icon": "🌍",
+  "triggers": ["translate", "translation", "prevedi", "prevedi na", "what does", "meaning of"],
+  "endpoint": "/skills/translator",
+  "method": "POST",
+  "params": {
+    "text": "string - text to translate",
+    "from": "string - source language code (auto, en, bs, de, fr, es, etc.)",
+    "to": "string - target language code"
+  }
+}

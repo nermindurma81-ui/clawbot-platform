@@ -10,6 +10,9 @@ RUN npm ci --only=production
 # Copy app
 COPY . .
 
+# Create data directories
+RUN mkdir -p data data/uploads data/projects data/workflows
+
 # Expose port
 EXPOSE 3000
 

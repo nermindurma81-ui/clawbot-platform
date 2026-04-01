@@ -1,0 +1,10 @@
+{
+  "id": "skills",
+  "name": "Skill Manager",
+  "version": "1.0.0",
+  "description": "Search, install, remove, and update skills from ClawHub and GitHub",
+  "icon": "📦",
+  "triggers": ["install skill", "add skill", "remove skill", "list skills", "search skill", "update skill"],
+  "endpoint": "/skills/skills",
+  "method": "POST"
+}

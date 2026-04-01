@@ -1,0 +1,10 @@
+{
+  "id": "vibe",
+  "name": "Vibe Coding",
+  "version": "1.0.0",
+  "description": "Describe what you want in natural language, get working code — powered by Groq/Llama 3.1",
+  "icon": "🚀",
+  "triggers": ["vibe", "build me", "create app", "make me", "generate", "scaffold", "napravi", "build"],
+  "endpoint": "/skills/vibe",
+  "method": "POST"
+}

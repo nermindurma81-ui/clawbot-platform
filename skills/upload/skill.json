@@ -1,0 +1,10 @@
+{
+  "id": "upload",
+  "name": "File Upload & Config",
+  "version": "1.0.0",
+  "description": "Upload skill.md, SOUL.md, MEMORY.md to configure the bot",
+  "icon": "📁",
+  "triggers": ["upload", "install soul", "set memory", "configure", "upload skill"],
+  "endpoint": "/skills/upload",
+  "method": "POST"
+}

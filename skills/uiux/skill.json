@@ -1,0 +1,10 @@
+{
+  "id": "uiux",
+  "name": "UI/UX Design",
+  "version": "1.0.0",
+  "description": "Generate wireframes, design specs, UX copy, and design systems",
+  "icon": "🖌️",
+  "triggers": ["design", "wireframe", "ux", "ui", "mockup", "prototype", "user flow"],
+  "endpoint": "/skills/uiux",
+  "method": "POST"
+}

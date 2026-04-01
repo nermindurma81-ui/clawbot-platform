@@ -1,0 +1,65 @@
+{
+  "version": "1.0.0",
+  "skills": {
+    "skills": {
+      "name": "Skill Manager",
+      "icon": "📦",
+      "triggers": ["install skill", "add skill", "remove skill", "list skills", "search skill"],
+      "description": "Search, install, and manage skills from ClawHub & GitHub"
+    },
+    "upload": {
+      "name": "File Upload & Config",
+      "icon": "📁",
+      "triggers": ["upload", "install soul", "set memory", "configure"],
+      "description": "Upload skill.md, SOUL.md, MEMORY.md to configure the bot"
+    },
+    "vibe": {
+      "name": "Vibe Coding",
+      "icon": "🚀",
+      "triggers": ["vibe", "build me", "create app", "make me", "napravi"],
+      "description": "Describe what you want, get working code"
+    },
+    "coding": {
+      "name": "Coding Agent",
+      "icon": "💻",
+      "triggers": ["code", "program", "script", "debug", "run", "execute"],
+      "description": "Write, execute, and debug code"
+    },
+    "automation": {
+      "name": "Automation Workflows",
+      "icon": "⚡",
+      "triggers": ["automate", "workflow", "schedule", "cron", "webhook"],
+      "description": "Create and run automated workflows"
+    },
+    "tailwind": {
+      "name": "Tailwind Design System",
+      "icon": "🎨",
+      "triggers": ["tailwind", "css", "design", "component", "style"],
+      "description": "Generate Tailwind components and design tokens"
+    },
+    "uiux": {
+      "name": "UI/UX Design",
+      "icon": "🖌️",
+      "triggers": ["design", "wireframe", "ux", "ui", "mockup"],
+      "description": "Wireframes, design specs, UX copy"
+    },
+    "translator": {
+      "name": "Translator",
+      "icon": "🌍",
+      "triggers": ["translate", "prevedi", "translation"],
+      "description": "Translate text between languages"
+    },
+    "weather": {
+      "name": "Weather",
+      "icon": "🌤️",
+      "triggers": ["weather", "forecast", "temperature"],
+      "description": "Current weather and forecasts"
+    },
+    "web-search": {
+      "name": "Web Search",
+      "icon": "🔍",
+      "triggers": ["search", "find", "google"],
+      "description": "Search the web"
+    }
+  }
+}

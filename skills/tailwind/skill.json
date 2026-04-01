@@ -1,0 +1,10 @@
+{
+  "id": "tailwind",
+  "name": "Tailwind Design System",
+  "version": "1.0.0",
+  "description": "Generate Tailwind CSS components, layouts, and design tokens",
+  "icon": "🎨",
+  "triggers": ["tailwind", "css", "design", "component", "style", "layout", "design system"],
+  "endpoint": "/skills/tailwind",
+  "method": "POST"
+}

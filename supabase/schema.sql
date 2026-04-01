@@ -56,6 +56,25 @@ CREATE TABLE IF NOT EXISTS public.user_skills (
   UNIQUE(user_id, skill_id)
 );
 
+-- ===== User Settings (synced across devices) =====
+CREATE TABLE IF NOT EXISTS public.user_settings (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL UNIQUE,
+  settings JSONB DEFAULT '{
+    "model": "llama-3.1-8b-instant",
+    "provider": "groq",
+    "theme": "dark",
+    "ollama_url": "",
+    "gateway_url": "",
+    "system_prompt": "",
+    "soul": "",
+    "memory": "",
+    "skills": []
+  }'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- ===== Indexes =====
 CREATE INDEX idx_chat_sessions_user ON public.chat_sessions(user_id);
 CREATE INDEX idx_chat_messages_session ON public.chat_messages(session_id);
@@ -68,6 +87,7 @@ ALTER TABLE public.chat_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.sync_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_skills ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_settings ENABLE ROW LEVEL SECURITY;
 
 -- Profiles: users can read/update their own profile
 CREATE POLICY "Users can view own profile" ON public.profiles
@@ -97,6 +117,10 @@ CREATE POLICY "Users can insert own sync log" ON public.sync_log
 
 -- User skills: users can manage their own
 CREATE POLICY "Users can manage own skills" ON public.user_skills
+  FOR ALL USING (auth.uid() = user_id);
+
+-- User settings: users can manage their own
+CREATE POLICY "Users can manage own settings" ON public.user_settings
   FOR ALL USING (auth.uid() = user_id);
 
 -- ===== Functions =====
@@ -130,6 +154,10 @@ CREATE OR REPLACE TRIGGER update_profiles_updated_at
 
 CREATE OR REPLACE TRIGGER update_sessions_updated_at
   BEFORE UPDATE ON public.chat_sessions
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+CREATE OR REPLACE TRIGGER update_user_settings_updated_at
+  BEFORE UPDATE ON public.user_settings
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
 
 -- ===== Realtime =====
