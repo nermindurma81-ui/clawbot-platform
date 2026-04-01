@@ -22,7 +22,37 @@ const CONFIG = {
   geminiKey: process.env.GEMINI_API_KEY || '',
   groqKey: process.env.GROQ_API_KEY || '',
   defaultProvider: process.env.AI_PROVIDER || (process.env.GROQ_API_KEY ? 'groq' : process.env.GEMINI_API_KEY ? 'gemini' : 'ollama'),
+  ownerEmail: process.env.OWNER_EMAIL || 'nermindurma81@gmail.com',
 };
+
+// ===== Rate Limiting + Analytics =====
+const rateLimits = new Map(); // ip -> { count, resetAt }
+const analytics = { messages: 0, skills_used: {}, models_used: {}, users: new Set(), started: Date.now() };
+const RATE_LIMIT = 30; // requests per minute
+const RATE_WINDOW = 60000;
+
+function checkRateLimit(userId, email) {
+  // Owner has no limits
+  if (email === CONFIG.ownerEmail) return { allowed: true, remaining: 999 };
+
+  const key = userId || 'anonymous';
+  const now = Date.now();
+  let entry = rateLimits.get(key);
+
+  if (!entry || now > entry.resetAt) {
+    entry = { count: 0, resetAt: now + RATE_WINDOW };
+    rateLimits.set(key, entry);
+  }
+
+  entry.count++;
+  const remaining = Math.max(0, RATE_LIMIT - entry.count);
+  return { allowed: entry.count <= RATE_LIMIT, remaining, resetAt: entry.resetAt };
+}
+
+// ===== Admin Check =====
+function isAdmin(email) {
+  return email === CONFIG.ownerEmail;
+}
 
 // ===== Middleware =====
 app.use(cors());
@@ -457,6 +487,297 @@ app.post('/chat', async (req, res) => {
     }
     res.status(502).json({ error: 'Chat failed', message: err.message });
   }
+});
+
+// ===== Streaming Chat (SSE) =====
+app.post('/chat/stream', async (req, res) => {
+  const { message, model, system } = req.body;
+  if (!message) return res.status(400).json({ error: 'Message required' });
+
+  // Rate limit check
+  const userId = req.user?.id || req.ip;
+  const userEmail = req.user?.email || '';
+  const rateCheck = checkRateLimit(userId, userEmail);
+  if (!rateCheck.allowed) {
+    return res.status(429).json({ error: 'Rate limit exceeded. Try again in a minute.', remaining: 0 });
+  }
+
+  // Analytics
+  analytics.messages++;
+  if (userEmail) analytics.users.add(userEmail);
+
+  // SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-RateLimit-Remaining', rateCheck.remaining);
+
+  const provider = req.body.provider || CONFIG.defaultProvider;
+
+  try {
+    // Build enhanced system prompt with SOUL + MEMORY
+    let enhancedSystem = system || '';
+    if (soulCache) enhancedSystem = `[Bot Personality]\n${soulCache}\n\n${enhancedSystem}`;
+    if (memoryCache) enhancedSystem = `${enhancedSystem}\n\n[Memory]\n${memoryCache.substring(0, 2000)}`;
+
+    // Skill detection
+    const matchedSkill = detectSkill(message);
+    let skillResult = null;
+    let chatMessage = message;
+    let chatModel = model;
+
+    if (matchedSkill) {
+      const skill = loadedSkills[matchedSkill.id];
+      if (skill?.handler?.run) {
+        try {
+          skillResult = await skill.handler.run(matchedSkill.params);
+          if (skillResult.instructions) {
+            enhancedSystem = `${enhancedSystem}\n\n[Skill: ${matchedSkill.id}]\n${skillResult.systemPrompt || ''}\nTask: ${skillResult.instructions}`;
+            chatMessage = skillResult.instructions;
+          } else if (skillResult.response || skillResult.output) {
+            res.write(`data: ${JSON.stringify({ content: skillResult.response || skillResult.output, done: true, skill: matchedSkill.id })}\n\n`);
+            res.end();
+            return;
+          }
+          if (skillResult.model) chatModel = skillResult.model;
+        } catch {}
+      }
+    }
+
+    // Track model usage
+    const usedModel = chatModel || (provider === 'groq' ? 'llama-3.1-8b-instant' : 'default');
+    analytics.models_used[usedModel] = (analytics.models_used[usedModel] || 0) + 1;
+    if (matchedSkill) analytics.skills_used[matchedSkill.id] = (analytics.skills_used[matchedSkill.id] || 0) + 1;
+
+    // Stream from Groq
+    if (provider === 'groq' && CONFIG.groqKey) {
+      const groqModel = chatModel && chatModel.startsWith('llama') ? chatModel : 'llama-3.1-8b-instant';
+      const messages = [];
+      if (enhancedSystem) messages.push({ role: 'system', content: enhancedSystem });
+      messages.push({ role: 'user', content: chatMessage });
+
+      const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${CONFIG.groqKey}`,
+        },
+        body: JSON.stringify({ model: groqModel, messages, max_tokens: 2048, stream: true }),
+      });
+
+      const reader = groqRes.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6).trim();
+            if (data === '[DONE]') {
+              res.write(`data: ${JSON.stringify({ done: true, model: groqModel })}\n\n`);
+            } else {
+              try {
+                const parsed = JSON.parse(data);
+                const content = parsed.choices?.[0]?.delta?.content;
+                if (content) {
+                  res.write(`data: ${JSON.stringify({ content })}\n\n`);
+                }
+              } catch {}
+            }
+          }
+        }
+      }
+    } else {
+      // Non-streaming fallback
+      let result;
+      try {
+        if (provider === 'gemini' && CONFIG.geminiKey) {
+          result = await chatGemini(chatMessage, chatModel, enhancedSystem);
+        } else {
+          result = await chatOllama(chatMessage, chatModel, enhancedSystem);
+        }
+      } catch {
+        if (CONFIG.groqKey) result = await chatGroq(chatMessage, chatModel, enhancedSystem);
+      }
+      res.write(`data: ${JSON.stringify({ content: result.response, done: true, model: result.model })}\n\n`);
+    }
+
+    res.end();
+  } catch (err) {
+    res.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
+    res.end();
+  }
+});
+
+// ===== Analytics Endpoint =====
+app.get('/analytics', (req, res) => {
+  const uptime = Math.floor((Date.now() - analytics.started) / 1000);
+  res.json({
+    messages: analytics.messages,
+    unique_users: analytics.users.size,
+    top_skills: Object.entries(analytics.skills_used).sort((a, b) => b[1] - a[1]).slice(0, 10),
+    top_models: Object.entries(analytics.models_used).sort((a, b) => b[1] - a[1]).slice(0, 10),
+    uptime_seconds: uptime,
+    is_admin: isAdmin(req.user?.email),
+  });
+});
+
+// ===== Admin Endpoint =====
+app.get('/admin', (req, res) => {
+  if (!isAdmin(req.user?.email)) return res.status(403).json({ error: 'Admin only' });
+
+  res.json({
+    owner: CONFIG.ownerEmail,
+    rate_limits: Object.fromEntries(rateLimits),
+    analytics: {
+      messages: analytics.messages,
+      users: Array.from(analytics.users),
+      skills: analytics.skills_used,
+      models: analytics.models_used,
+    },
+    skills_loaded: Object.keys(loadedSkills),
+    config: {
+      provider: CONFIG.defaultProvider,
+      groq: !!CONFIG.groqKey,
+      gemini: !!CONFIG.geminiKey,
+    },
+  });
+});
+
+// ===== Compare Models =====
+app.post('/chat/compare', async (req, res) => {
+  const { message, system } = req.body;
+  if (!message) return res.status(400).json({ error: 'Message required' });
+
+  if (!isAdmin(req.user?.email) && !checkRateLimit(req.user?.id || req.ip, req.user?.email).allowed) {
+    return res.status(429).json({ error: 'Rate limit exceeded' });
+  }
+
+  try {
+    let enhancedSystem = system || '';
+    if (soulCache) enhancedSystem = `[Bot Personality]\n${soulCache}\n\n${enhancedSystem}`;
+
+    const results = await Promise.allSettled([
+      chatGroq(message, 'llama-3.1-8b-instant', enhancedSystem),
+      chatGroq(message, 'llama-3.1-70b-versatile', enhancedSystem),
+    ]);
+
+    res.json({
+      models: [
+        { name: 'llama-3.1-8b-instant', response: results[0].status === 'fulfilled' ? results[0].value.response : results[0].reason.message, time: 'fast' },
+        { name: 'llama-3.1-70b-versatile', response: results[1].status === 'fulfilled' ? results[1].value.response : results[1].reason.message, time: 'slow' },
+      ],
+    });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// ===== Chat History (Supabase) =====
+app.get('/chats', async (req, res) => {
+  if (!supabase || !req.user) return res.json({ chats: [] });
+
+  try {
+    const { data } = await supabase
+      .from('chat_sessions')
+      .select('id, title, model, created_at, updated_at')
+      .eq('user_id', req.user.id)
+      .order('updated_at', { ascending: false })
+      .limit(50);
+    res.json({ chats: data || [] });
+  } catch { res.json({ chats: [] }); }
+});
+
+app.post('/chats', async (req, res) => {
+  if (!supabase || !req.user) return res.json({ id: 'local-' + Date.now() });
+
+  try {
+    const { data } = await supabase
+      .from('chat_sessions')
+      .insert({ user_id: req.user.id, title: req.body.title || 'New Chat', model: req.body.model })
+      .select()
+      .single();
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/chats/:id/messages', async (req, res) => {
+  if (!supabase || !req.user) return res.json({ messages: [] });
+
+  try {
+    const { data } = await supabase
+      .from('chat_messages')
+      .select('*')
+      .eq('session_id', req.params.id)
+      .order('created_at', { ascending: true })
+      .limit(100);
+    res.json({ messages: data || [] });
+  } catch { res.json({ messages: [] }); }
+});
+
+app.post('/chats/:id/messages', async (req, res) => {
+  if (!supabase || !req.user) return res.json({ success: true, local: true });
+
+  try {
+    await supabase.from('chat_messages').insert({
+      session_id: req.params.id,
+      role: req.body.role,
+      content: req.body.content,
+      model: req.body.model,
+    });
+    await supabase.from('chat_sessions').update({ updated_at: new Date().toISOString() }).eq('id', req.params.id);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/chats/:id', async (req, res) => {
+  if (!supabase || !req.user) return res.json({ success: true });
+
+  try {
+    await supabase.from('chat_sessions').delete().eq('id', req.params.id).eq('user_id', req.user.id);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ===== Shared Skills =====
+app.get('/skills/shared', async (req, res) => {
+  if (!supabase) return res.json({ skills: [] });
+
+  try {
+    const { data } = await supabase
+      .from('shared_skills')
+      .select('*')
+      .order('downloads', { ascending: false })
+      .limit(50);
+    res.json({ skills: data || [] });
+  } catch { res.json({ skills: [] }); }
+});
+
+app.post('/skills/share', async (req, res) => {
+  if (!supabase || !req.user) return res.status(401).json({ error: 'Login required' });
+
+  try {
+    const { data } = await supabase
+      .from('shared_skills')
+      .insert({
+        user_id: req.user.id,
+        author: req.user.email?.split('@')[0],
+        name: req.body.name,
+        description: req.body.description,
+        content: req.body.content,
+        triggers: req.body.triggers || [],
+      })
+      .select()
+      .single();
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ===== Models Endpoint =====
