@@ -18,7 +18,8 @@ const CONFIG = {
   supabaseUrl: process.env.SUPABASE_URL || '',
   supabaseKey: process.env.SUPABASE_ANON_KEY || '',
   geminiKey: process.env.GEMINI_API_KEY || '',
-  defaultProvider: process.env.AI_PROVIDER || (process.env.GEMINI_API_KEY ? 'gemini' : 'ollama'),
+  groqKey: process.env.GROQ_API_KEY || '',
+  defaultProvider: process.env.AI_PROVIDER || (process.env.GROQ_API_KEY ? 'groq' : process.env.GEMINI_API_KEY ? 'gemini' : 'ollama'),
 };
 
 // ===== Middleware =====
@@ -121,6 +122,35 @@ const gatewayProxy = createProxyMiddleware({
 });
 app.use('/api', gatewayProxy);
 
+// ===== Groq Chat Helper =====
+async function chatGroq(message, model, system) {
+  const groqModel = model && model.startsWith('llama') ? model : 'llama-3.1-8b-instant';
+
+  const messages = [];
+  if (system) messages.push({ role: 'system', content: system });
+  messages.push({ role: 'user', content: message });
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${CONFIG.groqKey}`,
+    },
+    body: JSON.stringify({ model: groqModel, messages, max_tokens: 1024 }),
+    signal: controller.signal,
+  });
+  clearTimeout(timeout);
+
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message || 'Groq error');
+
+  const text = data.choices?.[0]?.message?.content || 'No response';
+  return { response: text, model: groqModel, provider: 'groq' };
+}
+
 // ===== Gemini Chat Helper =====
 async function chatGemini(message, model, system) {
   const geminiModel = model && model.startsWith('gemini') ? model : 'gemini-1.5-flash';
@@ -189,15 +219,19 @@ app.post('/chat', async (req, res) => {
   try {
     let result;
 
-    if (provider === 'gemini' && CONFIG.geminiKey) {
+    if (provider === 'groq' && CONFIG.groqKey) {
+      result = await chatGroq(message, model, system);
+    } else if (provider === 'gemini' && CONFIG.geminiKey) {
       result = await chatGemini(message, model, system);
     } else {
-      // Try Ollama first, fall back to Gemini
+      // Try Ollama first, fall back to Groq then Gemini
       try {
         result = await chatOllama(message, model, system);
       } catch (ollamaErr) {
-        console.log('Ollama failed, trying Gemini:', ollamaErr.message);
-        if (CONFIG.geminiKey) {
+        console.log('Ollama failed:', ollamaErr.message);
+        if (CONFIG.groqKey) {
+          result = await chatGroq(message, model, system);
+        } else if (CONFIG.geminiKey) {
           result = await chatGemini(message, model, system);
         } else {
           throw ollamaErr;
@@ -224,6 +258,15 @@ app.get('/models', async (req, res) => {
     const data = await ollamaRes.json();
     if (data.models) models.push(...data.models);
   } catch { /* Ollama offline */ }
+
+  // Groq models (if configured)
+  if (CONFIG.groqKey) {
+    models.push(
+      { name: 'llama-3.1-8b-instant', model: 'llama-3.1-8b-instant', provider: 'groq', size: 0 },
+      { name: 'llama-3.1-70b-versatile', model: 'llama-3.1-70b-versatile', provider: 'groq', size: 0 },
+      { name: 'mixtral-8x7b-32768', model: 'mixtral-8x7b-32768', provider: 'groq', size: 0 },
+    );
+  }
 
   // Gemini models (if configured)
   if (CONFIG.geminiKey) {
@@ -257,6 +300,7 @@ app.get('/status', async (req, res) => {
 
   // Check Gemini
   checks.gemini = CONFIG.geminiKey ? 'configured' : 'not configured';
+  checks.groq = CONFIG.groqKey ? 'configured' : 'not configured';
   checks.provider = CONFIG.defaultProvider;
 
   res.json({
