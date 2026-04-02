@@ -1108,6 +1108,41 @@ async function installFromMarketplace(slug) {
   }
 }
 
+async function searchSkills() {
+  const queryInput = document.getElementById('skill-search-input');
+  const resultsEl = document.getElementById('search-results');
+  if (!resultsEl) return;
+
+  const query = queryInput?.value?.trim() || '';
+  if (!query) {
+    resultsEl.innerHTML = '<div class="loading">Type keyword to search skills...</div>';
+    return;
+  }
+
+  resultsEl.innerHTML = '<div class="loading">Searching...</div>';
+  const skills = await loadMarketplace(query);
+
+  if (!skills.length) {
+    resultsEl.innerHTML = '<div class="loading">No matching skills found.</div>';
+    return;
+  }
+
+  resultsEl.innerHTML = skills.map(s => `
+    <div class="marketplace-item">
+      <div class="mi-header">
+        <span class="mi-icon">${s.icon || '🔧'}</span>
+        <div>
+          <div class="mi-name">${s.name || s.id}</div>
+          <div class="mi-desc">${s.description || ''}</div>
+        </div>
+      </div>
+      <button class="btn-sm btn-primary" onclick="installFromMarketplace('${s.slug || s.id}')">
+        ${s.installed ? '✅ Installed' : '⬇️ Install'}
+      </button>
+    </div>
+  `).join('');
+}
+
 // ===== Custom Commands =====
 async function loadCommands() {
   try {
