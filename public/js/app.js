@@ -15,12 +15,17 @@ document.addEventListener('DOMContentLoaded', () => {
     applyTheme();
   } catch (e) { console.error('Init error:', e); }
   
-  // Delay auth check to not block page
-  setTimeout(() => {
-    try {
-      if (authToken) checkAuth();
-    } catch (e) { console.error('Auth error:', e); }
-  }, 100);
+  // Auto-skip auth if no token - enter app directly
+  if (!authToken) {
+    setTimeout(() => enterApp(), 200);
+  } else {
+    // Delay auth check to not block page
+    setTimeout(() => {
+      try {
+        checkAuth();
+      } catch (e) { console.error('Auth error:', e); }
+    }, 100);
+  }
   
   try { refreshStatus(); } catch {}
   try { refreshModels(); } catch {}
