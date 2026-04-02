@@ -864,6 +864,25 @@ function navigatePanel(direction) {
 document.addEventListener('DOMContentLoaded', () => {
   initSwipe();
 });
+
+// ===== Settings Bottom Sheet =====
+function toggleSettingsSheet() {
+  const sheet = document.getElementById('settings-sheet');
+  const overlay = document.getElementById('sheet-overlay');
+  sheet.classList.toggle('open');
+  overlay.classList.toggle('show');
+}
+
+function saveMobileSettings() {
+  const model = document.getElementById('setting-model-mobile')?.value;
+  const system = document.getElementById('setting-system-mobile')?.value;
+  
+  if (model) document.getElementById('setting-model').value = model;
+  if (system) document.getElementById('setting-system').value = system;
+  
+  saveSettings();
+  toggleSettingsSheet();
+}
   if (!bytes) return 'Unknown';
   const gb = bytes / (1024 ** 3);
   return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(bytes / (1024 ** 2)).toFixed(0)} MB`;

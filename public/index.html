@@ -355,6 +355,36 @@ return { output: 'Hello!' }
       </div>
     </main>
 
+    <!-- Settings Bottom Sheet (Mobile) -->
+    <div class="bottom-sheet" id="settings-sheet">
+      <div class="bottom-sheet-handle" onclick="toggleSettingsSheet()"></div>
+      <div class="bottom-sheet-content">
+        <h3 style="padding: 0 16px 12px">⚙️ Settings</h3>
+        <div class="settings-form" style="padding-top: 0">
+          <div class="setting-group">
+            <label>Default Model</label>
+            <select id="setting-model-mobile">
+              <option value="llama-3.1-8b-instant">Llama 3.1 8B</option>
+              <option value="llama-3.1-70b-versatile">Llama 3.1 70B</option>
+            </select>
+          </div>
+          <div class="setting-group">
+            <label>System Prompt</label>
+            <textarea id="setting-system-mobile" rows="3" placeholder="You are a helpful AI assistant..."></textarea>
+          </div>
+          <div class="setting-group">
+            <label>Theme</label>
+            <div style="display:flex;gap:8px">
+              <button class="btn-sm" onclick="toggleTheme()" id="theme-btn-mobile">🌙 Dark</button>
+              <button class="btn-sm" onclick="logout()">🚪 Logout</button>
+            </div>
+          </div>
+          <button class="btn-primary" onclick="saveMobileSettings()" style="width:100%">Save Settings</button>
+        </div>
+      </div>
+    </div>
+    <div class="sheet-overlay" id="sheet-overlay" onclick="toggleSettingsSheet()"></div>
+
     <!-- Bottom Navigation (mobile) -->
     <nav class="bottom-nav" id="bottom-nav">
       <button class="bottom-nav-item active" onclick="showPanel('chat')" data-panel="chat">
@@ -372,7 +402,7 @@ return { output: 'Hello!' }
         <span class="bn-icon">⚡</span>
         <span class="bn-label">Skills</span>
       </button>
-      <button class="bottom-nav-item" onclick="showPanel('settings')" data-panel="settings">
+      <button class="bottom-nav-item" onclick="toggleSettingsSheet()" data-panel="settings">
         <span class="bn-icon">⚙️</span>
         <span class="bn-label">Settings</span>
       </button>
