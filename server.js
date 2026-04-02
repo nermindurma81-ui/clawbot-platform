@@ -1711,21 +1711,81 @@ app.get('/skills', (req, res) => {
 });
 
 // ===== Skill Marketplace (ClawHub) =====
+const CLAWHUB_API_BASE = process.env.CLAWHUB_API_BASE || 'https://registry.clawhub.com/api';
+
+function normalizeMarketplaceSkill(raw = {}) {
+  const slug = raw.slug || raw.id || raw.name || raw.skill_id || '';
+  const name = raw.name || raw.title || raw.slug || raw.id || '';
+  return {
+    id: raw.id || slug,
+    slug,
+    name,
+    description: raw.description || raw.summary || '',
+    icon: raw.icon || '🔧',
+    content: raw.content || raw.skill_md || null,
+    download_url: raw.download_url || raw.url || raw.raw_url || null,
+    installed: !!loadedSkills[slug],
+  };
+}
+
+async function fetchMarketplaceList(query = '', limit = 20) {
+  const endpoints = [
+    query
+      ? `${CLAWHUB_API_BASE}/skills/search?q=${encodeURIComponent(query)}&limit=${limit}`
+      : `${CLAWHUB_API_BASE}/skills?limit=${limit}`,
+    query
+      ? `https://clawhub.com/api/skills?q=${encodeURIComponent(query)}&limit=${limit}`
+      : `https://clawhub.com/api/skills?limit=${limit}`,
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      if (!response.ok) continue;
+      const data = await response.json();
+      const list = Array.isArray(data.skills) ? data.skills : Array.isArray(data.results) ? data.results : [];
+      if (!list.length) continue;
+      return list.map(normalizeMarketplaceSkill);
+    } catch {}
+  }
+  return [];
+}
+
+async function fetchMarketplaceSkillBySlug(slug) {
+  const safe = encodeURIComponent(slug);
+  const endpoints = [
+    `${CLAWHUB_API_BASE}/skills/${safe}`,
+    `https://clawhub.com/api/skills/${safe}`,
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      if (!response.ok) continue;
+      const data = await response.json();
+      const raw = data.skill || data;
+      const normalized = normalizeMarketplaceSkill(raw);
+      if (normalized.slug || normalized.name || normalized.content || normalized.download_url) return normalized;
+    } catch {}
+  }
+  return null;
+}
+
 app.get('/marketplace', async (req, res) => {
   const query = req.query.q || '';
   const limit = parseInt(req.query.limit) || 20;
   
   try {
-    const url = query 
-      ? `https://clawhub.com/api/skills?q=${encodeURIComponent(query)}&limit=${limit}`
-      : `https://clawhub.com/api/skills?limit=${limit}`;
-    const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
-    const data = await response.json();
-    res.json({ skills: data.skills || [], source: 'clawhub' });
+    const skills = await fetchMarketplaceList(query, limit);
+    if (skills.length) {
+      return res.json({ skills, source: 'clawhub' });
+    }
+    throw new Error('Marketplace unavailable');
   } catch {
     // Fallback: return installed skills
     const skills = Object.entries(loadedSkills).map(([id, s]) => ({
       id, name: s.name || id, description: s.description || '',
+      slug: id,
       icon: s.icon || '🔧', triggers: s.triggers || [], installed: true,
     }));
     res.json({ skills, source: 'local' });
@@ -1735,12 +1795,14 @@ app.get('/marketplace', async (req, res) => {
 // Install from marketplace
 app.post('/marketplace/install/:slug', async (req, res) => {
   try {
-    const response = await fetch(`https://clawhub.com/api/skills/${encodeURIComponent(req.params.slug)}`, {
-      signal: AbortSignal.timeout(10000),
-    });
-    const skill = await response.json();
-    const content = skill.content || skill.skill_md;
-    if (!content) return res.status(404).json({ error: 'Skill content not found' });
+    const skill = await fetchMarketplaceSkillBySlug(req.params.slug);
+    if (!skill) return res.status(404).json({ error: `Skill '${req.params.slug}' not found on marketplace` });
+    let content = skill.content;
+    if (!content && skill.download_url) {
+      const dl = await fetch(skill.download_url, { signal: AbortSignal.timeout(10000) });
+      if (dl.ok) content = await dl.text();
+    }
+    if (!content) return res.status(404).json({ error: 'Skill content not found for selected marketplace skill' });
     
     const uploadSkill = loadedSkills['upload'];
     if (!uploadSkill) return res.status(500).json({ error: 'Upload skill not loaded' });

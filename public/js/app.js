@@ -1018,6 +1018,7 @@ function showInstallTab(tab, btnEl = null) {
   document.querySelectorAll('.install-tabs .tab').forEach(el => el.classList.remove('active'));
   document.getElementById(`install-${tab}`).classList.remove('hidden');
   if (btnEl) btnEl.classList.add('active');
+  if (tab === 'marketplace') loadMarketplaceUI();
 }
 
 async function installSkillMd() {
@@ -1392,6 +1393,7 @@ document.getElementById('zip-upload')?.addEventListener('change', async (e) => {
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     if (status) status.innerHTML = `✅ ${data.message}<br>Skills: ${data.skills?.join(', ') || 'none'}`;
+    alert(`✅ ${data.message}`);
     refreshSkills();
     loadSettings();
   } catch (err) {

@@ -248,7 +248,7 @@ return { output: 'Hello!' }
             </div>
 
             <div id="install-url" class="install-tab-content hidden">
-              <input type="text" id="skill-url-input" placeholder="https://github.com/.../skill.md">
+              <input type="text" id="skill-url-input" placeholder="https://github.com/.../skill.md" onkeyup="if(event.key==='Enter')installSkillFromUrl()">
               <button class="btn-primary" onclick="installSkillFromUrl()">Install from URL</button>
             </div>
 

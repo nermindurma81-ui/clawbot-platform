@@ -7,6 +7,7 @@ const SKILLS_DIR = path.join(__dirname, '..', '..');
 const SOUL_PATH = path.join(DATA_DIR, 'soul.md');
 const MEMORY_PATH = path.join(DATA_DIR, 'memory.md');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
+const CLAWHUB_API_BASE = process.env.CLAWHUB_API_BASE || 'https://registry.clawhub.com/api';
 
 const SKILL = {
   id: 'upload',
@@ -324,10 +325,7 @@ module.exports = SKILL;
     if (!query) return { response: '🔍 Napiši šta tražiš. Npr: "nađi skill za prevodjenje"' };
 
     try {
-      const res = await fetch(`https://clawhub.com/api/skills?q=${encodeURIComponent(query)}&limit=5`, {
-        signal: AbortSignal.timeout(10000),
-      });
-      const data = await res.json();
+      const data = await this.fetchMarketplaceList(query, 5);
 
       if (data.skills && data.skills.length > 0) {
         // AUTO-INSTALL first result
@@ -348,7 +346,7 @@ module.exports = SKILL;
       }
     } catch {}
 
-    return { response: `🔍 Nisam našao skill za "${slug}". Pošalji URL skill.md da instaliram.` };
+    return { response: `🔍 Nisam našao skill za "${query}". Pošalji URL skill.md da instaliram.` };
   },
 
   // Install skill from ClawHub by slug/name
@@ -357,12 +355,8 @@ module.exports = SKILL;
 
     try {
       // Try ClawHub API first — exact match
-      const res = await fetch(`https://clawhub.com/api/skills/${encodeURIComponent(slug)}`, {
-        signal: AbortSignal.timeout(10000),
-      });
-
-      if (res.ok) {
-        const skill = await res.json();
+      const skill = await this.fetchMarketplaceSkill(slug);
+      if (skill) {
         if (skill.content || skill.skill_md) {
           const content = skill.content || skill.skill_md;
           const result = await this.installSkillMd(content, 'skill.md');
@@ -381,10 +375,7 @@ module.exports = SKILL;
 
     // No exact match — search and auto-install first result
     try {
-      const searchRes = await fetch(`https://clawhub.com/api/skills?q=${encodeURIComponent(slug)}&limit=1`, {
-        signal: AbortSignal.timeout(10000),
-      });
-      const searchData = await searchRes.json();
+      const searchData = await this.fetchMarketplaceList(slug, 1);
 
       if (searchData.skills && searchData.skills.length > 0) {
         const best = searchData.skills[0];
@@ -420,6 +411,40 @@ module.exports = SKILL;
     } catch {}
 
     return { response: `❌ Nisam našao skill "${slug}" na ClawHub-u. Probaj drugačiji naziv ili pošalji URL.` };
+  },
+
+  async fetchMarketplaceList(query, limit = 5) {
+    const endpoints = [
+      `${CLAWHUB_API_BASE}/skills/search?q=${encodeURIComponent(query)}&limit=${limit}`,
+      `https://clawhub.com/api/skills?q=${encodeURIComponent(query)}&limit=${limit}`,
+    ];
+    for (const url of endpoints) {
+      try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+        if (!res.ok) continue;
+        const data = await res.json();
+        const skills = Array.isArray(data.skills) ? data.skills : Array.isArray(data.results) ? data.results : [];
+        if (skills.length) return { skills };
+      } catch {}
+    }
+    return { skills: [] };
+  },
+
+  async fetchMarketplaceSkill(slug) {
+    const safe = encodeURIComponent(slug);
+    const endpoints = [
+      `${CLAWHUB_API_BASE}/skills/${safe}`,
+      `https://clawhub.com/api/skills/${safe}`,
+    ];
+    for (const url of endpoints) {
+      try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+        if (!res.ok) continue;
+        const data = await res.json();
+        return data.skill || data;
+      } catch {}
+    }
+    return null;
   },
 
   async hotReload(slug) {
