@@ -1372,6 +1372,26 @@ async function updateAllSkills() {
   }
 }
 
+async function installAwesomeTopSkills() {
+  const ok = confirm('Install Top 5 skills from each Awesome OpenClaw category? This can take a few minutes.');
+  if (!ok) return;
+
+  try {
+    const res = await fetch(`${API}/skills/bootstrap-awesome`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ perCategory: 5 }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Bootstrap install failed');
+
+    alert(`✅ ${data.message}\nInstalled: ${data.installed?.length || 0}\nFailed: ${data.failed?.length || 0}`);
+    await refreshSkills();
+  } catch (err) {
+    alert(`❌ ${err.message}`);
+  }
+}
+
 // ===== Marketplace UI =====
 async function loadMarketplaceUI() {
   const container = document.getElementById('marketplace-list');
