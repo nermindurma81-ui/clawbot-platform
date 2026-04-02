@@ -135,8 +135,12 @@ function showAuthError(msg) {
 function showPanel(name) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.querySelectorAll('.bottom-nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById(`panel-${name}`).classList.add('active');
-  document.querySelector(`[data-panel="${name}"]`).classList.add('active');
+  const sidebarItem = document.querySelector(`.nav-item[data-panel="${name}"]`);
+  if (sidebarItem) sidebarItem.classList.add('active');
+  const bottomItem = document.querySelector(`.bottom-nav-item[data-panel="${name}"]`);
+  if (bottomItem) bottomItem.classList.add('active');
 
   // Load data for panels
   if (name === 'history') loadChatHistory();
@@ -171,6 +175,9 @@ async function sendMessage() {
   isStreaming = true;
   document.getElementById('send-btn').disabled = true;
 
+  // Show typing indicator
+  const typingId = addTypingIndicator();
+
   const botMsgId = addMessage('bot', '');
   const botContent = document.querySelector(`#${botMsgId} .msg-content`);
 
@@ -183,6 +190,9 @@ async function sendMessage() {
       },
       body: JSON.stringify({ message, model }),
     });
+
+    // Remove typing indicator once response starts
+    removeTypingIndicator(typingId);
 
     if (!res.ok) {
       const errData = await res.json();
@@ -247,8 +257,10 @@ async function sendMessage() {
 
 function addMessage(role, content) {
   const container = document.getElementById('chat-messages');
-  const welcome = container.querySelector('.welcome-msg');
+  const welcome = container.querySelector('.welcome-screen');
   if (welcome) welcome.remove();
+  const quickActions = container.parentElement.querySelector('.quick-actions');
+  if (quickActions) quickActions.style.display = 'none';
 
   const id = 'msg-' + Date.now();
   const div = document.createElement('div');
@@ -256,11 +268,37 @@ function addMessage(role, content) {
   div.id = id;
   div.innerHTML = `
     <div class="msg-avatar">${role === 'user' ? '👤' : '🐾'}</div>
-    <div class="msg-content">${role === 'bot' && !content ? '<div class="typing-indicator"><span></span><span></span><span></span></div>' : formatMessage(content)}</div>
+    <div class="msg-content">${formatMessage(content)}</div>
   `;
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
   return id;
+}
+
+function addTypingIndicator() {
+  const container = document.getElementById('chat-messages');
+  const id = 'typing-' + Date.now();
+  const div = document.createElement('div');
+  div.className = 'message bot';
+  div.id = id;
+  div.innerHTML = `
+    <div class="msg-avatar">🐾</div>
+    <div class="msg-content">
+      <div class="typing-indicator">
+        <span class="dot"></span>
+        <span class="dot"></span>
+        <span class="dot"></span>
+      </div>
+    </div>
+  `;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return id;
+}
+
+function removeTypingIndicator(id) {
+  const el = document.getElementById(id);
+  if (el) el.remove();
 }
 
 function formatMessage(text) {

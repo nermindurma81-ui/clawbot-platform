@@ -1356,3 +1356,288 @@ code:not(pre code) {
   background: var(--bg-hover);
   color: var(--text-secondary);
 }
+
+/* ===== Bottom Navigation (Mobile) ===== */
+.bottom-nav {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 60px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  z-index: 300;
+  justify-content: space-around;
+  align-items: center;
+  padding: 0 8px;
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+.mobile-device .bottom-nav {
+  display: flex;
+}
+
+.mobile-device .main-content {
+  padding-bottom: 60px;
+}
+
+.mobile-device .chat-input-area {
+  padding-bottom: calc(6px + env(safe-area-inset-bottom, 0));
+}
+
+.bottom-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 10px;
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: 12px;
+  transition: all 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.bottom-nav-item:active {
+  transform: scale(0.9);
+}
+
+.bottom-nav-item.active {
+  color: var(--accent);
+}
+
+.bottom-nav-item.active .bn-icon {
+  transform: scale(1.1);
+}
+
+.bn-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.bn-label {
+  font-size: 10px;
+  font-weight: 500;
+}
+
+/* FAB (center button) */
+.fab-btn {
+  position: relative;
+  top: -12px;
+}
+
+.fab-icon {
+  width: 48px;
+  height: 48px;
+  background: var(--accent);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px !important;
+  color: white !important;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.fab-btn:active .fab-icon {
+  transform: scale(0.9);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+}
+
+/* Bottom Sheet (Settings) */
+.bottom-sheet {
+  position: fixed;
+  bottom: 60px;
+  left: 0;
+  right: 0;
+  max-height: 70vh;
+  background: var(--bg-secondary);
+  border-radius: 20px 20px 0 0;
+  z-index: 350;
+  transform: translateY(100%);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow-y: auto;
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.3);
+}
+
+.bottom-sheet.open {
+  transform: translateY(0);
+}
+
+.bottom-sheet-handle {
+  width: 40px;
+  height: 4px;
+  background: var(--text-secondary);
+  border-radius: 2px;
+  margin: 10px auto;
+  opacity: 0.5;
+}
+
+/* Panel transitions */
+.panel {
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Message animations */
+.message {
+  animation: msgSlide 0.3s ease;
+}
+
+@keyframes msgSlide {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Typing indicator */
+.typing-indicator {
+  display: flex;
+  gap: 4px;
+  padding: 12px 16px;
+  align-items: center;
+}
+
+.typing-indicator .dot {
+  width: 8px;
+  height: 8px;
+  background: var(--text-secondary);
+  border-radius: 50%;
+  animation: typingBounce 1.4s infinite ease-in-out;
+}
+
+.typing-indicator .dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-indicator .dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typingBounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-8px); opacity: 1; }
+}
+
+/* Quick actions bar */
+.quick-actions {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.quick-actions::-webkit-scrollbar { display: none; }
+
+.quick-action {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.quick-action:active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+/* Notification badge */
+.badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 16px;
+  height: 16px;
+  background: #ef4444;
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Better welcome screen */
+.welcome-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  text-align: center;
+  min-height: 60vh;
+}
+
+.welcome-screen .logo-big {
+  font-size: 64px;
+  margin-bottom: 16px;
+  animation: logoFloat 3s ease-in-out infinite;
+}
+
+@keyframes logoFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+.welcome-screen h2 {
+  font-size: 22px;
+  margin-bottom: 8px;
+}
+
+.welcome-screen .subtitle {
+  color: var(--text-secondary);
+  margin-bottom: 24px;
+  font-size: 14px;
+}
+
+.suggestion-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  width: 100%;
+  max-width: 400px;
+}
+
+.suggestion-card {
+  padding: 14px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+}
+
+.suggestion-card:active {
+  transform: scale(0.96);
+  border-color: var(--accent);
+}
+
+.suggestion-card .sc-icon {
+  font-size: 20px;
+  margin-bottom: 6px;
+}
+
+.suggestion-card .sc-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.suggestion-card .sc-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+}

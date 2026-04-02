@@ -114,16 +114,40 @@
           </div>
         </div>
         <div class="chat-messages" id="chat-messages">
-          <div class="welcome-msg">
-            <h3>Welcome to ClawBot 🐾</h3>
-            <p>AI powered by Groq • Skills • Streaming</p>
-            <div class="quick-prompts">
-              <button class="chip" onclick="sendQuick('Objasni mi machine learning')">🤖 ML explain</button>
-              <button class="chip" onclick="sendQuick('Napravi mi todo app')">🚀 Build app</button>
-              <button class="chip" onclick="sendQuick('translate hello to German')">🌍 Translate</button>
-              <button class="chip" onclick="sendQuick('weather in Sarajevo')">🌤️ Weather</button>
+          <div class="welcome-screen">
+            <div class="logo-big">🐾</div>
+            <h2>ClawBot</h2>
+            <p class="subtitle">AI powered by Groq • Skills • Streaming</p>
+            <div class="suggestion-cards">
+              <div class="suggestion-card" onclick="sendQuick('Objasni mi machine learning')">
+                <div class="sc-icon">🤖</div>
+                <div class="sc-title">ML Explain</div>
+                <div class="sc-desc">Objasni ML koncept</div>
+              </div>
+              <div class="suggestion-card" onclick="sendQuick('Napravi mi todo app u HTML/CSS/JS')">
+                <div class="sc-icon">🚀</div>
+                <div class="sc-title">Build App</div>
+                <div class="sc-desc">Napravi aplikaciju</div>
+              </div>
+              <div class="suggestion-card" onclick="sendQuick('translate zdravo na engleski')">
+                <div class="sc-icon">🌍</div>
+                <div class="sc-title">Translate</div>
+                <div class="sc-desc">Prevedi tekst</div>
+              </div>
+              <div class="suggestion-card" onclick="sendQuick('weather in Sarajevo')">
+                <div class="sc-icon">🌤️</div>
+                <div class="sc-title">Weather</div>
+                <div class="sc-desc">Vremenska prognoza</div>
+              </div>
             </div>
           </div>
+        </div>
+        <!-- Quick Actions -->
+        <div class="quick-actions">
+          <button class="quick-action" onclick="sendQuick('instaliraj skill')">⚡ Install Skill</button>
+          <button class="quick-action" onclick="sendQuick('analiziraj kod')">💻 Code Review</button>
+          <button class="quick-action" onclick="sendQuick('napravi sliku opis')">🎨 Image Idea</button>
+          <button class="quick-action" onclick="sendQuick('summariziraj tekst')">📝 Summarize</button>
         </div>
         <div class="chat-input-area">
           <input type="file" id="file-upload" hidden onchange="handleFileUpload(event)">
@@ -330,6 +354,29 @@ return { output: 'Hello!' }
         </div>
       </div>
     </main>
+
+    <!-- Bottom Navigation (mobile) -->
+    <nav class="bottom-nav" id="bottom-nav">
+      <button class="bottom-nav-item active" onclick="showPanel('chat')" data-panel="chat">
+        <span class="bn-icon">💬</span>
+        <span class="bn-label">Chat</span>
+      </button>
+      <button class="bottom-nav-item" onclick="showPanel('history')" data-panel="history">
+        <span class="bn-icon">📜</span>
+        <span class="bn-label">History</span>
+      </button>
+      <button class="bottom-nav-item fab-btn" onclick="newChat()">
+        <span class="bn-icon fab-icon">➕</span>
+      </button>
+      <button class="bottom-nav-item" onclick="showPanel('skills')" data-panel="skills">
+        <span class="bn-icon">⚡</span>
+        <span class="bn-label">Skills</span>
+      </button>
+      <button class="bottom-nav-item" onclick="showPanel('settings')" data-panel="settings">
+        <span class="bn-icon">⚙️</span>
+        <span class="bn-label">Settings</span>
+      </button>
+    </nav>
   </div>
 
   <script src="/js/app.js"></script>
