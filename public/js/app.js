@@ -746,9 +746,36 @@ async function refreshModels() {
       }
     }
 
+    syncSettingsModelOptions();
+
   } catch (err) {
     console.error('refreshModels failed:', err);
   }
+}
+
+function syncSettingsModelOptions() {
+  const source = document.getElementById('model-select');
+  const settingsSelect = document.getElementById('setting-model');
+  const mobileSelect = document.getElementById('setting-model-mobile');
+  if (!source) return;
+
+  const selectedSettingsValue = settingsSelect?.value;
+  const selectedMobileValue = mobileSelect?.value;
+
+  const copyOptions = (target) => {
+    if (!target) return;
+    target.innerHTML = '';
+    for (const opt of source.options) {
+      const cloned = opt.cloneNode(true);
+      target.appendChild(cloned);
+    }
+  };
+
+  copyOptions(settingsSelect);
+  copyOptions(mobileSelect);
+
+  if (settingsSelect && selectedSettingsValue) settingsSelect.value = selectedSettingsValue;
+  if (mobileSelect && selectedMobileValue) mobileSelect.value = selectedMobileValue;
 }
 
 // ===== Status =====
@@ -867,6 +894,12 @@ async function loadSettings() {
     if (s) {
       document.getElementById('setting-ollama').value = s.ollama_url || '';
       document.getElementById('setting-gateway').value = s.gateway_url || '';
+      if (s.model) {
+        const modelSel = document.getElementById('setting-model');
+        const modelMobileSel = document.getElementById('setting-model-mobile');
+        if (modelSel) modelSel.value = s.model;
+        if (modelMobileSel) modelMobileSel.value = s.model;
+      }
       document.getElementById('setting-system').value = s.system_prompt || '';
     }
   } catch {}
