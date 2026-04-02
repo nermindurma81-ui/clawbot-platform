@@ -804,16 +804,29 @@ function saveSettings() {
     });
 }
 
-async function saveHuggingFaceSettings() {
-  const token = document.getElementById('setting-hf-token')?.value?.trim() || '';
-  const customModelsRaw = document.getElementById('setting-hf-models')?.value || '';
+let providerSettingsCache = {};
+
+function populateProviderConfigForm() {
+  const providerId = document.getElementById('setting-provider-select')?.value;
+  const tokenInput = document.getElementById('setting-provider-token');
+  const modelsInput = document.getElementById('setting-provider-models');
+  const cfg = providerSettingsCache?.[providerId] || {};
+  if (tokenInput) tokenInput.value = '';
+  if (modelsInput) modelsInput.value = (cfg.custom_models || []).join('\n');
+}
+
+async function saveProviderSettings() {
+  const providerId = document.getElementById('setting-provider-select')?.value;
+  if (!providerId) return;
+  const token = document.getElementById('setting-provider-token')?.value?.trim() || '';
+  const customModelsRaw = document.getElementById('setting-provider-models')?.value || '';
   const custom_models = customModelsRaw
     .split('\n')
     .map(v => v.trim())
     .filter(Boolean);
 
   try {
-    const res = await fetch(`${API}/settings/providers/huggingface`, {
+    const res = await fetch(`${API}/settings/providers/${encodeURIComponent(providerId)}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -823,7 +836,9 @@ async function saveHuggingFaceSettings() {
     });
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || 'Save failed');
-    alert(`✅ ${data.message || 'HuggingFace settings saved'}`);
+    alert(`✅ ${data.message || 'Provider settings saved'}`);
+    providerSettingsCache = data.providers || providerSettingsCache;
+    populateProviderConfigForm();
     await refreshModels();
   } catch (err) {
     alert(`❌ ${err.message}`);
@@ -837,11 +852,8 @@ async function loadProviderSettings() {
     });
     if (!res.ok) return;
     const data = await res.json();
-    const hf = data.huggingface || {};
-    const tokenInput = document.getElementById('setting-hf-token');
-    const modelsInput = document.getElementById('setting-hf-models');
-    if (tokenInput) tokenInput.value = '';
-    if (modelsInput) modelsInput.value = (hf.custom_models || []).join('\n');
+    providerSettingsCache = data.providers || {};
+    populateProviderConfigForm();
   } catch {}
 }
 

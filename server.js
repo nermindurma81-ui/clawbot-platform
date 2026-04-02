@@ -127,19 +127,30 @@ function getLocalUsers() {
 }
 
 function getRuntimeConfig() {
+  const defaultProviders = {
+    groq: { token: '', custom_models: [] },
+    cerebras: { token: '', custom_models: [] },
+    mistral: { token: '', custom_models: [] },
+    siliconflow: { token: '', custom_models: [] },
+    gemini: { token: '', custom_models: [] },
+    huggingface: { token: '', custom_models: [] },
+    llm7: { token: '', custom_models: [] },
+  };
   if (!fs.existsSync(runtimeConfigPath)) {
-    return { huggingface: { token: '', custom_models: [] } };
+    return { providers: defaultProviders };
   }
   try {
     const data = JSON.parse(fs.readFileSync(runtimeConfigPath, 'utf8'));
-    return {
-      huggingface: {
-        token: data?.huggingface?.token || '',
-        custom_models: Array.isArray(data?.huggingface?.custom_models) ? data.huggingface.custom_models : [],
-      },
-    };
+    const storedProviders = data?.providers || data || {};
+    for (const id of Object.keys(defaultProviders)) {
+      defaultProviders[id] = {
+        token: storedProviders?.[id]?.token || '',
+        custom_models: Array.isArray(storedProviders?.[id]?.custom_models) ? storedProviders[id].custom_models : [],
+      };
+    }
+    return { providers: defaultProviders };
   } catch {
-    return { huggingface: { token: '', custom_models: [] } };
+    return { providers: defaultProviders };
   }
 }
 
@@ -149,19 +160,35 @@ function saveRuntimeConfig(nextConfig) {
 }
 
 function getHfToken() {
-  const runtime = getRuntimeConfig();
-  return runtime.huggingface.token || CONFIG.hfKey;
+  return getProviderToken('huggingface');
 }
 
 function getHfModelCatalog() {
   const runtime = getRuntimeConfig();
   const custom = {};
-  for (const raw of runtime.huggingface.custom_models || []) {
+  for (const raw of runtime.providers.huggingface.custom_models || []) {
     const id = String(raw || '').trim();
     if (!id) continue;
     custom[id] = { name: id, size: 'custom' };
   }
   return { ...HF_MODELS, ...custom };
+}
+
+function getProviderToken(providerId) {
+  const runtime = getRuntimeConfig();
+  const runtimeToken = runtime.providers?.[providerId]?.token || '';
+  if (runtimeToken) return runtimeToken;
+
+  const envMap = {
+    groq: CONFIG.groqKey,
+    cerebras: CONFIG.cerebrasKey,
+    mistral: CONFIG.mistralKey,
+    siliconflow: CONFIG.siliconKey,
+    gemini: CONFIG.geminiKey,
+    huggingface: CONFIG.hfKey,
+    llm7: '',
+  };
+  return envMap[providerId] || '';
 }
 
 function normalizeEmail(email) {
@@ -356,39 +383,52 @@ app.post('/settings', async (req, res) => {
 
 app.get('/settings/providers', (req, res) => {
   const runtime = getRuntimeConfig();
-  const hfToken = getHfToken();
+  const providers = {};
+  for (const id of Object.keys(runtime.providers || {})) {
+    providers[id] = {
+      configured: !!getProviderToken(id),
+      has_runtime_token: !!runtime.providers[id]?.token,
+      custom_models: runtime.providers[id]?.custom_models || [],
+    };
+  }
   res.json({
-    huggingface: {
-      configured: !!hfToken,
-      has_runtime_token: !!runtime.huggingface.token,
-      custom_models: runtime.huggingface.custom_models || [],
-    },
+    providers,
   });
 });
 
-app.post('/settings/providers/huggingface', (req, res) => {
-  const { token, custom_models } = req.body || {};
+app.post('/settings/providers/:providerId', (req, res) => {
+  const providerId = req.params.providerId;
   const runtime = getRuntimeConfig();
+  if (!runtime.providers?.[providerId]) {
+    return res.status(400).json({ error: 'Unsupported provider: ' + providerId });
+  }
+
+  const { token, custom_models } = req.body || {};
 
   const normalizedModels = Array.isArray(custom_models)
     ? custom_models.map(v => String(v || '').trim()).filter(Boolean)
     : [];
 
-  runtime.huggingface = {
-    token: typeof token === 'string' ? token.trim() : (runtime.huggingface.token || ''),
+  runtime.providers[providerId] = {
+    token: typeof token === 'string' ? token.trim() : (runtime.providers[providerId].token || ''),
     custom_models: [...new Set(normalizedModels)],
   };
 
   saveRuntimeConfig(runtime);
 
+  const providers = {};
+  for (const id of Object.keys(runtime.providers || {})) {
+    providers[id] = {
+      configured: !!getProviderToken(id),
+      has_runtime_token: !!runtime.providers[id]?.token,
+      custom_models: runtime.providers[id]?.custom_models || [],
+    };
+  }
+
   res.json({
     success: true,
-    message: 'HuggingFace settings saved',
-    huggingface: {
-      configured: !!getHfToken(),
-      has_runtime_token: !!runtime.huggingface.token,
-      custom_models: runtime.huggingface.custom_models,
-    },
+    message: `${providerId} settings saved`,
+    providers,
   });
 });
 
@@ -516,6 +556,8 @@ app.use('/api', gatewayProxy);
 
 // ===== Groq Chat Helper =====
 async function chatGroq(message, model, system) {
+  const groqToken = getProviderToken('groq');
+  if (!groqToken) throw new Error('GROQ token nije postavljen');
   const groqModel = model && model.startsWith('llama') ? model : 'llama-3.1-8b-instant';
 
   const messages = [];
@@ -529,7 +571,7 @@ async function chatGroq(message, model, system) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${CONFIG.groqKey}`,
+      'Authorization': `Bearer ${groqToken}`,
     },
     body: JSON.stringify({ model: groqModel, messages, max_tokens: 1024 }),
     signal: controller.signal,
@@ -545,8 +587,10 @@ async function chatGroq(message, model, system) {
 
 // ===== Gemini Chat Helper =====
 async function chatGemini(message, model, system) {
+  const geminiToken = getProviderToken('gemini');
+  if (!geminiToken) throw new Error('Gemini token nije postavljen');
   const geminiModel = model && model.startsWith('gemini') ? model : 'gemini-1.5-flash';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${CONFIG.geminiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiToken}`;
 
   const contents = [];
   if (system) contents.push({ role: 'user', parts: [{ text: system }] });
@@ -796,17 +840,45 @@ const SILICON_MODELS = {
   'internlm/internlm2_5-7b-chat':    { name: 'InternLM 2.5 7B',     speed: '⚡⚡⚡', size: '7B'  },
 };
 
+function getProviderModelCatalog(provider) {
+  const runtime = getRuntimeConfig();
+  const customList = runtime.providers?.[provider]?.custom_models || [];
+  const custom = {};
+  for (const raw of customList) {
+    const id = String(raw || '').trim();
+    if (!id) continue;
+    custom[id] = { name: id, size: 'custom', speed: '⚡' };
+  }
+
+  if (provider === 'groq') return { ...GROQ_MODELS, ...custom };
+  if (provider === 'cerebras') return { ...CEREBRAS_MODELS, ...custom };
+  if (provider === 'llm7') return { ...LLM7_MODELS, ...custom };
+  if (provider === 'mistral') return { ...MISTRAL_MODELS, ...custom };
+  if (provider === 'siliconflow') return { ...SILICON_MODELS, ...custom };
+  if (provider === 'huggingface') return getHfModelCatalog();
+  if (provider === 'gemini') {
+    const base = {
+      'gemini-2.0-flash': { name: 'Gemini 2.0 Flash', speed: '⚡⚡⚡', size: 'cloud' },
+      'gemini-1.5-flash': { name: 'Gemini 1.5 Flash', speed: '⚡⚡⚡', size: 'cloud' },
+      'gemini-1.5-pro': { name: 'Gemini 1.5 Pro', speed: '⚡⚡', size: 'cloud' },
+    };
+    return { ...base, ...custom };
+  }
+  return custom;
+}
+
 function resolveProviderModel(provider, requestedModel) {
   const requested = String(requestedModel || '').trim();
-  const inList = (map) => requested && Object.prototype.hasOwnProperty.call(map, requested);
+  const catalog = getProviderModelCatalog(provider);
+  const hasRequested = requested && Object.prototype.hasOwnProperty.call(catalog, requested);
 
-  if (provider === 'groq')       return inList(GROQ_MODELS) ? requested : 'llama-3.1-8b-instant';
-  if (provider === 'cerebras')   return inList(CEREBRAS_MODELS) ? requested : 'llama-3.3-70b';
-  if (provider === 'llm7')       return inList(LLM7_MODELS) ? requested : 'deepseek-chat';
-  if (provider === 'mistral')    return inList(MISTRAL_MODELS) ? requested : 'mistral-small-latest';
-  if (provider === 'siliconflow')return inList(SILICON_MODELS) ? requested : 'Qwen/Qwen3-8B';
-  if (provider === 'huggingface')return requested || HF_DEFAULT_MODEL;
-  if (provider === 'gemini')     return requested || 'gemini-1.5-flash';
+  if (provider === 'groq')       return hasRequested ? requested : 'llama-3.1-8b-instant';
+  if (provider === 'cerebras')   return hasRequested ? requested : 'llama-3.3-70b';
+  if (provider === 'llm7')       return hasRequested ? requested : 'deepseek-chat';
+  if (provider === 'mistral')    return hasRequested ? requested : 'mistral-small-latest';
+  if (provider === 'siliconflow')return hasRequested ? requested : 'Qwen/Qwen3-8B';
+  if (provider === 'huggingface')return hasRequested ? requested : (requested || HF_DEFAULT_MODEL);
+  if (provider === 'gemini')     return hasRequested ? requested : (requested || 'gemini-1.5-flash');
   return requested || 'llama-3.1-8b-instant';
 }
 
@@ -897,7 +969,7 @@ async function streamOpenAICompat({ baseUrl, apiKey, model, provider, message, s
 async function chatCerebras(message, model, system) {
   const text = await chatOpenAICompat({
     baseUrl: 'https://api.cerebras.ai/v1',
-    apiKey: CONFIG.cerebrasKey,
+    apiKey: getProviderToken('cerebras'),
     model: model || 'llama-3.3-70b',
     message, system,
   });
@@ -917,7 +989,7 @@ async function chatLLM7(message, model, system) {
 async function chatMistralAI(message, model, system) {
   const text = await chatOpenAICompat({
     baseUrl: 'https://api.mistral.ai/v1',
-    apiKey: CONFIG.mistralKey,
+    apiKey: getProviderToken('mistral'),
     model: model || 'mistral-small-latest',
     message, system,
   });
@@ -927,7 +999,7 @@ async function chatMistralAI(message, model, system) {
 async function chatSiliconFlow(message, model, system) {
   const text = await chatOpenAICompat({
     baseUrl: 'https://api.siliconflow.cn/v1',
-    apiKey: CONFIG.siliconKey,
+    apiKey: getProviderToken('siliconflow'),
     model: model || 'Qwen/Qwen3-8B',
     message, system,
   });
@@ -1051,15 +1123,15 @@ app.post('/chat', async (req, res) => {
     // Skill can override model (e.g. knowledge uses 70B)
     const chatModel = skillResult?.model || model;
 
-    if (provider === 'groq' && CONFIG.groqKey) {
+    if (provider === 'groq' && getProviderToken('groq')) {
       result = await chatGroq(chatMessage, resolveProviderModel('groq', chatModel), enhancedSystem);
-    } else if (provider === 'cerebras' && CONFIG.cerebrasKey) {
+    } else if (provider === 'cerebras' && getProviderToken('cerebras')) {
       result = await chatCerebras(chatMessage, resolveProviderModel('cerebras', chatModel), enhancedSystem);
-    } else if (provider === 'gemini' && CONFIG.geminiKey) {
+    } else if (provider === 'gemini' && getProviderToken('gemini')) {
       result = await chatGemini(chatMessage, resolveProviderModel('gemini', chatModel), enhancedSystem);
-    } else if (provider === 'mistral' && CONFIG.mistralKey) {
+    } else if (provider === 'mistral' && getProviderToken('mistral')) {
       result = await chatMistralAI(chatMessage, resolveProviderModel('mistral', chatModel), enhancedSystem);
-    } else if (provider === 'siliconflow' && CONFIG.siliconKey) {
+    } else if (provider === 'siliconflow' && getProviderToken('siliconflow')) {
       result = await chatSiliconFlow(chatMessage, resolveProviderModel('siliconflow', chatModel), enhancedSystem);
     } else if (provider === 'huggingface' && getHfToken()) {
       result = await chatHuggingFace(chatMessage, resolveProviderModel('huggingface', chatModel), enhancedSystem);
@@ -1072,10 +1144,10 @@ app.post('/chat', async (req, res) => {
       } catch (ollamaErr) {
         console.log('Ollama failed, trying fallbacks...', ollamaErr.message);
         try {
-          if (CONFIG.groqKey)      result = await chatGroq(chatMessage, chatModel, enhancedSystem);
-          else if (CONFIG.cerebrasKey) result = await chatCerebras(chatMessage, chatModel, enhancedSystem);
-          else if (CONFIG.geminiKey)   result = await chatGemini(chatMessage, chatModel, enhancedSystem);
-          else if (CONFIG.mistralKey)  result = await chatMistralAI(chatMessage, chatModel, enhancedSystem);
+          if (getProviderToken('groq'))      result = await chatGroq(chatMessage, chatModel, enhancedSystem);
+          else if (getProviderToken('cerebras')) result = await chatCerebras(chatMessage, chatModel, enhancedSystem);
+          else if (getProviderToken('gemini'))   result = await chatGemini(chatMessage, chatModel, enhancedSystem);
+          else if (getProviderToken('mistral'))  result = await chatMistralAI(chatMessage, chatModel, enhancedSystem);
           else if (getHfToken())       result = await chatHuggingFace(chatMessage, chatModel, enhancedSystem);
           else                         result = await chatLLM7(chatMessage, chatModel, enhancedSystem);
         } catch (fallbackErr) {
@@ -1155,7 +1227,7 @@ app.post('/chat/stream', async (req, res) => {
     if (matchedSkill) analytics.skills_used[matchedSkill.id] = (analytics.skills_used[matchedSkill.id] || 0) + 1;
 
     // Stream from Groq
-    if (provider === 'groq' && CONFIG.groqKey) {
+    if (provider === 'groq' && getProviderToken('groq')) {
       const groqModel = resolveProviderModel('groq', chatModel);
       const messages = [];
       if (enhancedSystem) messages.push({ role: 'system', content: enhancedSystem });
@@ -1176,7 +1248,7 @@ app.post('/chat/stream', async (req, res) => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${CONFIG.groqKey}`,
+          'Authorization': `Bearer ${getProviderToken('groq')}`,
         },
         body: JSON.stringify({ model: groqModel, messages, max_tokens: 2048, stream: true }),
       });
@@ -1210,15 +1282,15 @@ app.post('/chat/stream', async (req, res) => {
           }
         }
       }
-    } else if (provider === 'cerebras' && CONFIG.cerebrasKey) {
+    } else if (provider === 'cerebras' && getProviderToken('cerebras')) {
       const modelToUse = resolveProviderModel('cerebras', chatModel);
-      await streamOpenAICompat({ baseUrl: 'https://api.cerebras.ai/v1', apiKey: CONFIG.cerebrasKey, model: modelToUse, provider: 'cerebras', message: chatMessage, system: enhancedSystem, res, history });
-    } else if (provider === 'mistral' && CONFIG.mistralKey) {
+      await streamOpenAICompat({ baseUrl: 'https://api.cerebras.ai/v1', apiKey: getProviderToken('cerebras'), model: modelToUse, provider: 'cerebras', message: chatMessage, system: enhancedSystem, res, history });
+    } else if (provider === 'mistral' && getProviderToken('mistral')) {
       const modelToUse = resolveProviderModel('mistral', chatModel);
-      await streamOpenAICompat({ baseUrl: 'https://api.mistral.ai/v1', apiKey: CONFIG.mistralKey, model: modelToUse, provider: 'mistral', message: chatMessage, system: enhancedSystem, res, history });
-    } else if (provider === 'siliconflow' && CONFIG.siliconKey) {
+      await streamOpenAICompat({ baseUrl: 'https://api.mistral.ai/v1', apiKey: getProviderToken('mistral'), model: modelToUse, provider: 'mistral', message: chatMessage, system: enhancedSystem, res, history });
+    } else if (provider === 'siliconflow' && getProviderToken('siliconflow')) {
       const modelToUse = resolveProviderModel('siliconflow', chatModel);
-      await streamOpenAICompat({ baseUrl: 'https://api.siliconflow.cn/v1', apiKey: CONFIG.siliconKey, model: modelToUse, provider: 'siliconflow', message: chatMessage, system: enhancedSystem, res, history });
+      await streamOpenAICompat({ baseUrl: 'https://api.siliconflow.cn/v1', apiKey: getProviderToken('siliconflow'), model: modelToUse, provider: 'siliconflow', message: chatMessage, system: enhancedSystem, res, history });
     } else if (provider === 'huggingface' && getHfToken()) {
       await streamHuggingFace(chatMessage, chatModel, enhancedSystem, res, history);
     } else if (provider === 'llm7') {
@@ -1229,11 +1301,11 @@ app.post('/chat/stream', async (req, res) => {
       // Non-streaming fallback → uvijek završi na LLM7
       let result;
       try {
-        if (provider === 'gemini' && CONFIG.geminiKey) result = await chatGemini(chatMessage, chatModel, enhancedSystem);
+        if (provider === 'gemini' && getProviderToken('gemini')) result = await chatGemini(chatMessage, chatModel, enhancedSystem);
         else result = await chatOllama(chatMessage, chatModel, enhancedSystem);
       } catch {
         try {
-          if (CONFIG.groqKey)    result = await chatGroq(chatMessage, chatModel, enhancedSystem);
+          if (getProviderToken('groq'))    result = await chatGroq(chatMessage, chatModel, enhancedSystem);
           else if (getHfToken()) result = await chatHuggingFace(chatMessage, chatModel, enhancedSystem);
           else                   result = await chatLLM7(chatMessage, chatModel, enhancedSystem);
         } catch { result = await chatLLM7(chatMessage, 'deepseek-chat', enhancedSystem); }
@@ -1257,18 +1329,18 @@ app.get('/models/providers', (req, res) => {
       name: '⚡ Groq',
       badge: 'GROQ',
       description: '700+ tok/sec — najbrži API',
-      configured: !!CONFIG.groqKey,
+      configured: !!getProviderToken('groq'),
       key_url: 'https://console.groq.com',
-      models: Object.entries(GROQ_MODELS).map(([id, m]) => ({ id, ...m, provider: 'groq' })),
+      models: Object.entries(getProviderModelCatalog('groq')).map(([id, m]) => ({ id, ...m, provider: 'groq' })),
     },
     {
       id: 'cerebras',
       name: '⚡ Cerebras',
       badge: 'CEREBRAS',
       description: 'LPU inference — brz kao Groq',
-      configured: !!CONFIG.cerebrasKey,
+      configured: !!getProviderToken('cerebras'),
       key_url: 'https://cloud.cerebras.ai',
-      models: Object.entries(CEREBRAS_MODELS).map(([id, m]) => ({ id, ...m, provider: 'cerebras' })),
+      models: Object.entries(getProviderModelCatalog('cerebras')).map(([id, m]) => ({ id, ...m, provider: 'cerebras' })),
     },
     {
       id: 'llm7',
@@ -1277,38 +1349,34 @@ app.get('/models/providers', (req, res) => {
       description: 'Bez API ključa — radi odmah',
       configured: true,  // uvijek dostupan
       key_url: null,
-      models: Object.entries(LLM7_MODELS).map(([id, m]) => ({ id, ...m, provider: 'llm7' })),
+      models: Object.entries(getProviderModelCatalog('llm7')).map(([id, m]) => ({ id, ...m, provider: 'llm7' })),
     },
     {
       id: 'mistral',
       name: '🌬️ Mistral AI',
       badge: 'MISTRAL',
       description: '1B tokena/mj besplatno',
-      configured: !!CONFIG.mistralKey,
+      configured: !!getProviderToken('mistral'),
       key_url: 'https://console.mistral.ai',
-      models: Object.entries(MISTRAL_MODELS).map(([id, m]) => ({ id, ...m, provider: 'mistral' })),
+      models: Object.entries(getProviderModelCatalog('mistral')).map(([id, m]) => ({ id, ...m, provider: 'mistral' })),
     },
     {
       id: 'siliconflow',
       name: '🔷 SiliconFlow',
       badge: 'SILICON',
       description: '1000 RPM besplatno',
-      configured: !!CONFIG.siliconKey,
+      configured: !!getProviderToken('siliconflow'),
       key_url: 'https://siliconflow.cn',
-      models: Object.entries(SILICON_MODELS).map(([id, m]) => ({ id, ...m, provider: 'siliconflow' })),
+      models: Object.entries(getProviderModelCatalog('siliconflow')).map(([id, m]) => ({ id, ...m, provider: 'siliconflow' })),
     },
     {
       id: 'gemini',
       name: '✨ Google Gemini',
       badge: 'GEMINI',
       description: '1M token context besplatno',
-      configured: !!CONFIG.geminiKey,
+      configured: !!getProviderToken('gemini'),
       key_url: 'https://aistudio.google.com',
-      models: [
-        { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', speed: '⚡⚡⚡', size: 'cloud', provider: 'gemini' },
-        { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', speed: '⚡⚡⚡', size: 'cloud', provider: 'gemini' },
-        { id: 'gemini-1.5-pro',   name: 'Gemini 1.5 Pro',   speed: '⚡⚡',   size: 'cloud', provider: 'gemini' },
-      ],
+      models: Object.entries(getProviderModelCatalog('gemini')).map(([id, m]) => ({ id, ...m, provider: 'gemini' })),
     },
     {
       id: 'huggingface',
@@ -1369,8 +1437,8 @@ app.get('/admin', (req, res) => {
     skills_loaded: Object.keys(loadedSkills),
     config: {
       provider: CONFIG.defaultProvider,
-      groq: !!CONFIG.groqKey,
-      gemini: !!CONFIG.geminiKey,
+      groq: !!getProviderToken('groq'),
+      gemini: !!getProviderToken('gemini'),
     },
   });
 });
@@ -1555,8 +1623,8 @@ app.get('/status', async (req, res) => {
   checks.supabase = supabase ? 'configured' : 'not configured';
 
   // Check Gemini
-  checks.gemini = CONFIG.geminiKey ? 'configured' : 'not configured';
-  checks.groq = CONFIG.groqKey ? 'configured' : 'not configured';
+  checks.gemini = getProviderToken('gemini') ? 'configured' : 'not configured';
+  checks.groq = getProviderToken('groq') ? 'configured' : 'not configured';
   checks.provider = CONFIG.defaultProvider;
 
   res.json({
@@ -1991,8 +2059,8 @@ app.get('/config', (req, res) => {
     memory: memory ? { loaded: true, preview: memory + '...' } : { loaded: false },
     skills: { loaded: skillCount, names: Object.keys(loadedSkills) },
     provider: CONFIG.defaultProvider,
-    groq: !!CONFIG.groqKey,
-    gemini: !!CONFIG.geminiKey,
+    groq: !!getProviderToken('groq'),
+    gemini: !!getProviderToken('gemini'),
     huggingface: !!getHfToken(),
     hf_models: Object.keys(getHfModelCatalog()).length,
   });
@@ -2079,8 +2147,8 @@ server.listen(PORT, '0.0.0.0', () => {
 ║  Gateway:  ${CONFIG.gateway.padEnd(37)}║
 ║  Ollama:   ${CONFIG.ollama.padEnd(37)}║
 ║  Supabase: ${(supabase ? '✅ connected' : '❌ not set').padEnd(37)}║
-║  Groq:     ${(CONFIG.groqKey ? '✅ configured' : '❌ not set').padEnd(37)}║
-║  Gemini:   ${(CONFIG.geminiKey ? '✅ configured' : '❌ not set').padEnd(37)}║
+║  Groq:     ${(getProviderToken('groq') ? '✅ configured' : '❌ not set').padEnd(37)}║
+║  Gemini:   ${(getProviderToken('gemini') ? '✅ configured' : '❌ not set').padEnd(37)}║
 ║  HuggFace: ${(getHfToken() ? '✅ ' + Object.keys(getHfModelCatalog()).length + ' models available' : '❌ not set').padEnd(37)}║
 ║  Health:   http://localhost:${PORT}/status          ║
 ╚══════════════════════════════════════════════════╝

@@ -360,14 +360,26 @@ return { output: 'Hello!' }
             <textarea id="setting-system" rows="4" placeholder="You are a helpful AI assistant..."></textarea>
           </div>
           <div class="setting-group">
-            <label>HuggingFace Token</label>
-            <input type="password" id="setting-hf-token" placeholder="hf_... (optional runtime token)">
+            <label>Provider Config (Token + Custom Models)</label>
+            <select id="setting-provider-select" onchange="populateProviderConfigForm()">
+              <option value="groq">Groq</option>
+              <option value="cerebras">Cerebras</option>
+              <option value="mistral">Mistral</option>
+              <option value="siliconflow">SiliconFlow</option>
+              <option value="gemini">Gemini</option>
+              <option value="huggingface">HuggingFace</option>
+              <option value="llm7">LLM7</option>
+            </select>
           </div>
           <div class="setting-group">
-            <label>Custom HuggingFace Models (one per line)</label>
-            <textarea id="setting-hf-models" rows="4" placeholder="meta-llama/Llama-3.1-8B-Instruct&#10;Qwen/Qwen2.5-72B-Instruct"></textarea>
+            <label>Provider Token (optional runtime override)</label>
+            <input type="password" id="setting-provider-token" placeholder="API token...">
           </div>
-          <button class="btn-sm" onclick="saveHuggingFaceSettings()">Save HF Token & Models</button>
+          <div class="setting-group">
+            <label>Custom Models (one per line)</label>
+            <textarea id="setting-provider-models" rows="4" placeholder="model-id-1&#10;model-id-2"></textarea>
+          </div>
+          <button class="btn-sm" onclick="saveProviderSettings()">Save Provider Config</button>
           <button class="btn-primary" onclick="saveSettings()">Save Settings</button>
         </div>
       </div>
