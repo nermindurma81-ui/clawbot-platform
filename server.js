@@ -7,6 +7,7 @@ const { createProxyMiddleware } = require('http-proxy-middleware');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const cors = require('cors');
 const multer = require('multer');
 const AdmZip = require('adm-zip');
@@ -104,22 +105,62 @@ const localUsersPath = path.join(DATA_DIR, 'local-users.json');
 
 function getLocalUsers() {
   if (!fs.existsSync(localUsersPath)) return {};
-  return JSON.parse(fs.readFileSync(localUsersPath));
+  try {
+    return JSON.parse(fs.readFileSync(localUsersPath));
+  } catch {
+    return {};
+  }
+}
+
+function normalizeEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `scrypt$${salt}$${hash}`;
+}
+
+function verifyPassword(password, storedPassword) {
+  if (typeof storedPassword !== 'string' || !storedPassword) return false;
+
+  // Backward compatibility for previously saved plain-text local users
+  if (!storedPassword.startsWith('scrypt$')) {
+    return password === storedPassword;
+  }
+
+  const parts = storedPassword.split('$');
+  if (parts.length !== 3) return false;
+  const [, salt, savedHash] = parts;
+  const computedHash = crypto.scryptSync(password, salt, 64).toString('hex');
+  try {
+    return crypto.timingSafeEqual(Buffer.from(savedHash, 'hex'), Buffer.from(computedHash, 'hex'));
+  } catch {
+    return false;
+  }
 }
 
 function saveLocalUser(email, password) {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   const users = getLocalUsers();
+  const normalizedEmail = normalizeEmail(email);
+  if (users[normalizedEmail]) return null;
   const id = 'local-' + Date.now();
-  users[email] = { id, email, password, created: new Date().toISOString() };
+  users[normalizedEmail] = {
+    id,
+    email: normalizedEmail,
+    password: hashPassword(password),
+    created: new Date().toISOString(),
+  };
   fs.writeFileSync(localUsersPath, JSON.stringify(users, null, 2));
-  return { id, email };
+  return { id, email: normalizedEmail };
 }
 
 function verifyLocalUser(email, password) {
   const users = getLocalUsers();
-  const user = users[email];
-  if (user && user.password === password) {
+  const user = users[normalizeEmail(email)];
+  if (user && verifyPassword(password, user.password)) {
     return { id: user.id, email: user.email };
   }
   return null;
@@ -129,17 +170,19 @@ function verifyLocalUser(email, password) {
 app.post('/auth/signup', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) return res.status(400).json({ error: 'Invalid email' });
 
   // Try Supabase first
   if (supabase) {
     try {
-      const { data, error } = await supabase.auth.signUp({ email, password });
+      const { data, error } = await supabase.auth.signUp({ email: normalizedEmail, password });
       if (!error && data.session) {
         return res.json({ user: data.user, session: data.session });
       }
       // If signup succeeded but no session (email confirmation), try auto-login
       if (!error && !data.session) {
-        const loginResult = await supabase.auth.signInWithPassword({ email, password });
+        const loginResult = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
         if (loginResult.data?.session) {
           return res.json({ user: loginResult.data.user, session: loginResult.data.session });
         }
@@ -148,8 +191,11 @@ app.post('/auth/signup', async (req, res) => {
   }
 
   // Fallback: local auth (no email confirmation needed)
-  const localUser = saveLocalUser(email, password);
-  const token = Buffer.from(JSON.stringify({ id: localUser.id, email })).toString('base64');
+  const localUser = saveLocalUser(normalizedEmail, password);
+  if (!localUser) {
+    return res.status(409).json({ error: 'User already exists' });
+  }
+  const token = Buffer.from(JSON.stringify({ id: localUser.id, email: normalizedEmail })).toString('base64');
   res.json({
     user: { id: localUser.id, email: localUser.email },
     session: { access_token: 'local-' + token },
@@ -161,11 +207,13 @@ app.post('/auth/signup', async (req, res) => {
 app.post('/auth/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) return res.status(400).json({ error: 'Invalid email' });
 
   // Try Supabase first
   if (supabase) {
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
       if (!error && data.session) {
         return res.json({ user: data.user, session: data.session });
       }
