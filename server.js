@@ -223,7 +223,7 @@ app.post('/auth/login', async (req, res) => {
   // Fallback: local auth
   const user = verifyLocalUser(email, password);
   if (user) {
-    const token = Buffer.from(JSON.stringify({ id: user.id, email })).toString('base64');
+    const token = Buffer.from(JSON.stringify({ id: user.id, email: user.email })).toString('base64');
     return res.json({
       user: { id: user.id, email: user.email },
       session: { access_token: 'local-' + token },

@@ -139,7 +139,7 @@ const SKILL = {
 
     return new Promise((resolve) => {
       const cloneUrl = `https://github.com/${repo}.git`;
-      exec(`git clone --depth 1 ${cloneUrl} "${targetDir}" 2>&1`, { timeout: 30000 }, (err, stdout) => {
+      exec(`git clone --depth 1 ${cloneUrl} "${targetDir}" 2>&1`, { timeout: 30000 }, async (err, stdout) => {
         if (err) {
           resolve({ error: `Clone failed: ${err.message}` });
           return;
@@ -229,7 +229,7 @@ const SKILL = {
     }
 
     return new Promise((resolve) => {
-      exec(`git clone --depth 1 https://github.com/openclaw/skills.git /tmp/openclaw-skills-cache 2>&1`, { timeout: 60000 }, (err) => {
+      exec(`git clone --depth 1 https://github.com/openclaw/skills.git /tmp/openclaw-skills-cache 2>&1`, { timeout: 60000 }, async (err) => {
         if (err) {
           resolve({ error: `Clone failed: ${err.message}` });
           return;
@@ -242,7 +242,7 @@ const SKILL = {
         }
 
         // Copy skill files
-        exec(`cp -r "${srcDir}" "${targetDir}" 2>&1`, (err2) => {
+        exec(`cp -r "${srcDir}" "${targetDir}" 2>&1`, async (err2) => {
           if (err2) {
             resolve({ error: `Copy failed: ${err2.message}` });
             return;

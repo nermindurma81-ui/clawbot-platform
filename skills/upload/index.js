@@ -425,7 +425,7 @@ module.exports = SKILL;
   async hotReload(slug) {
     try {
       const serverUrl = process.env.SERVER_URL || 'http://localhost:' + (process.env.PORT || 3000);
-      const res = await fetch(\`\${serverUrl}/skills/reload/\${slug}\`, {
+      const res = await fetch(`${serverUrl}/skills/reload/${slug}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(5000),
