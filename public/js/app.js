@@ -46,7 +46,7 @@ function applyTheme() {
 
 // ===== Auth =====
 function showAuthTab(tab, btnEl = null) {
-  document.querySelectorAll('.auth-box > .tabs .tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.auth-tabs .tab').forEach(t => t.classList.remove('active'));
   if (btnEl) btnEl.classList.add('active');
   document.getElementById('login-form').classList.toggle('hidden', tab !== 'login');
   document.getElementById('signup-form').classList.toggle('hidden', tab !== 'signup');
