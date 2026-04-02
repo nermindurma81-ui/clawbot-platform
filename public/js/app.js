@@ -707,7 +707,9 @@ async function refreshModels() {
     // Svi cloud provideri
     if (provRes.status === 'fulfilled' && provRes.value.ok) {
       const provData = await provRes.value.json();
+      providerModelsCache = {};
       (provData.providers || []).forEach(provider => {
+        providerModelsCache[provider.id] = provider.models || [];
         if (provider.id === 'ollama') return; // već dodano gore
         if (!provider.models?.length) return;
 
@@ -727,6 +729,9 @@ async function refreshModels() {
 
         select.appendChild(grp);
       });
+
+      const selectedProviderId = document.getElementById('setting-provider-select')?.value;
+      if (selectedProviderId) renderProviderAvailableModels(selectedProviderId);
     }
 
     // Ako je dropdown prazan, stavi fallback
@@ -832,6 +837,22 @@ function saveSettings() {
 }
 
 let providerSettingsCache = {};
+let providerModelsCache = {};
+
+function renderProviderAvailableModels(providerId) {
+  const host = document.getElementById('setting-provider-available-models');
+  if (!host) return;
+
+  const models = providerModelsCache[providerId] || [];
+  if (!models.length) {
+    host.innerHTML = '<div class="loading">No models available for this provider</div>';
+    return;
+  }
+
+  host.innerHTML = models
+    .map(m => `<div style="padding:4px 0;border-bottom:1px solid var(--border-color);font-size:13px">${m.id}</div>`)
+    .join('');
+}
 
 function populateProviderConfigForm() {
   const providerId = document.getElementById('setting-provider-select')?.value;
@@ -840,6 +861,7 @@ function populateProviderConfigForm() {
   const cfg = providerSettingsCache?.[providerId] || {};
   if (tokenInput) tokenInput.value = '';
   if (modelsInput) modelsInput.value = (cfg.custom_models || []).join('\n');
+  renderProviderAvailableModels(providerId);
 }
 
 async function saveProviderSettings() {

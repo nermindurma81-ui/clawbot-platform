@@ -379,6 +379,10 @@ return { output: 'Hello!' }
             <label>Custom Models (one per line)</label>
             <textarea id="setting-provider-models" rows="4" placeholder="model-id-1&#10;model-id-2"></textarea>
           </div>
+          <div class="setting-group">
+            <label>Available Models (selected provider)</label>
+            <div id="setting-provider-available-models" class="loading">Loading models...</div>
+          </div>
           <button class="btn-sm" onclick="saveProviderSettings()">Save Provider Config</button>
           <button class="btn-primary" onclick="saveSettings()">Save Settings</button>
         </div>
