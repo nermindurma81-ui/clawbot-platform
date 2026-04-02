@@ -1,10 +1,10 @@
 {
   "id": "upload",
-  "name": "File Upload & Config",
-  "version": "1.0.0",
-  "description": "Upload skill.md, SOUL.md, MEMORY.md to configure the bot",
-  "icon": "📁",
-  "triggers": ["upload", "install soul", "set memory", "configure", "upload skill"],
+  "name": "Skill Manager & Upload",
+  "version": "2.0.0",
+  "description": "Search, install, upload skills from ClawHub. Also manages SOUL.md and MEMORY.md",
+  "icon": "📦",
+  "triggers": ["upload", "install soul", "set memory", "configure", "upload skill", "install skill", "search skill", "find skill", "instaliraj", "nađi skill", "dodaj skill", "skill manager"],
   "endpoint": "/skills/upload",
   "method": "POST"
 }

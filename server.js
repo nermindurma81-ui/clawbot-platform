@@ -379,6 +379,31 @@ async function chatOllama(message, model, system) {
 function detectSkill(message) {
   const lower = message.toLowerCase().trim();
 
+  // === Smart install/search detection for upload skill ===
+  const installPatterns = [
+    /(?:install|instaliraj|dodaj|setup)\s+(?:skill|skillo?)?\s*(.+)/i,
+    /(?:nađi|nadji|find|search|traži|trazi)\s+(?:skill|skillo?)?\s*(.+)/i,
+    /(?:želim|hocu|hoću|want)\s+(?:skill|skillo?)?\s*(.+)/i,
+  ];
+
+  for (const pattern of installPatterns) {
+    const match = message.match(pattern);
+    if (match) {
+      const query = match[1]?.trim() || '';
+      if (lower.includes('install') || lower.includes('instaliraj') || lower.includes('dodaj') || lower.includes('želim') || lower.includes('hocu') || lower.includes('hoću') || lower.includes('want')) {
+        return {
+          id: 'upload',
+          params: { task: message, action: 'install', slug: query || message }
+        };
+      }
+      return {
+        id: 'upload',
+        params: { task: message, action: 'search', query: query || message }
+      };
+    }
+  }
+
+  // === General trigger matching ===
   for (const [id, skill] of Object.entries(loadedSkills)) {
     if (!skill.triggers || skill.triggers.length === 0) continue;
 
@@ -394,7 +419,6 @@ function detectSkill(message) {
         if (lower.includes('remove') || lower.includes('delete')) params.action = 'remove';
         if (lower.includes('translate')) {
           params.action = 'default';
-          // Try to detect target language
           const langMatch = lower.match(/(?:to|na|u|in)\s+(\w+)/);
           if (langMatch) params.to = langMatch[1];
           params.text = message.replace(/translate|prevedi|to|na|u|in/gi, '').trim();
@@ -402,6 +426,12 @@ function detectSkill(message) {
         if (lower.includes('weather')) {
           const cityMatch = lower.match(/(?:weather|forecast|temperatura).*?(?:in|u|for)\s+(\w+)/);
           if (cityMatch) params.city = cityMatch[1];
+        }
+
+        // Extract skill name for install actions
+        if (id === 'upload' && params.action === 'install') {
+          const nameMatch = message.match(/(?:install|instaliraj|dodaj)\s+(?:skill\s+)?(.+)/i);
+          if (nameMatch) params.slug = nameMatch[1].trim();
         }
 
         return { id, params };
