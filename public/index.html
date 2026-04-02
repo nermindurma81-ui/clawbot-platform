@@ -217,6 +217,11 @@
             <button class="btn-sm btn-primary" onclick="showInstallModal()">+ Install</button>
           </div>
         </div>
+        <div class="skill-filters">
+          <button class="chip active" id="skills-filter-all" onclick="setSkillFilter('all')">All</button>
+          <button class="chip" id="skills-filter-active" onclick="setSkillFilter('active')">Active</button>
+          <button class="chip" id="skills-filter-disabled" onclick="setSkillFilter('disabled')">Disabled</button>
+        </div>
 
         <!-- Install Modal -->
         <div id="install-modal" class="modal hidden">

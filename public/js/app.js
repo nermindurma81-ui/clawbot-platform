@@ -970,6 +970,8 @@ async function loadSettings() {
 }
 
 // ===== Skills Management =====
+window.SKILLS_FILTER = 'all';
+
 async function refreshSkills() {
   const list = document.getElementById('skills-list');
   list.innerHTML = '<div class="loading">Loading skills...</div>';
@@ -977,13 +979,19 @@ async function refreshSkills() {
   try {
     const res = await fetch(`${API}/skills`);
     const data = await res.json();
+    const allSkills = data.skills || [];
+    const visibleSkills = allSkills.filter(s => {
+      if (window.SKILLS_FILTER === 'active') return s.active !== false;
+      if (window.SKILLS_FILTER === 'disabled') return s.active === false;
+      return true;
+    });
 
-    if (!data.skills || data.skills.length === 0) {
+    if (!visibleSkills.length) {
       list.innerHTML = '<div class="loading">No skills installed</div>';
       return;
     }
 
-    list.innerHTML = data.skills.map(s => `
+    list.innerHTML = visibleSkills.map(s => `
       <div class="skill-card">
         <span class="skill-icon">${s.icon || '🔧'}</span>
         <div class="skill-info">
@@ -991,13 +999,41 @@ async function refreshSkills() {
           <p>${s.description || ''}</p>
           ${s.triggers?.length ? `<small class="triggers">${s.triggers.slice(0, 3).join(', ')}</small>` : ''}
         </div>
-        <span class="skill-status active">Active</span>
+        <div class="skill-card-actions">
+          <span class="skill-status ${s.active === false ? '' : 'active'}">${s.active === false ? 'Disabled' : 'Active'}</span>
+          ${s.core ? '' : `
+            <button class="btn-sm" onclick="toggleSkillState('${s.id}', ${s.active === false})">
+              ${s.active === false ? 'Enable' : 'Disable'}
+            </button>
+          `}
+        </div>
       </div>
     `).join('');
 
     loadConfig();
   } catch (err) {
     list.innerHTML = `<div class="loading error">${err.message}</div>`;
+  }
+}
+
+function setSkillFilter(filter) {
+  window.SKILLS_FILTER = filter;
+  document.getElementById('skills-filter-all')?.classList.toggle('active', filter === 'all');
+  document.getElementById('skills-filter-active')?.classList.toggle('active', filter === 'active');
+  document.getElementById('skills-filter-disabled')?.classList.toggle('active', filter === 'disabled');
+  refreshSkills();
+}
+
+async function toggleSkillState(skillId, enable) {
+  try {
+    const res = await fetch(`${API}/skills/${encodeURIComponent(skillId)}/${enable ? 'enable' : 'disable'}`, {
+      method: 'POST',
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Toggle failed');
+    refreshSkills();
+  } catch (err) {
+    alert(`❌ ${err.message}`);
   }
 }
 

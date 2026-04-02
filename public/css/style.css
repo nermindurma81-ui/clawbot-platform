@@ -432,6 +432,19 @@ html, body {
   overflow-y: auto;
 }
 
+.skill-filters {
+  display: flex;
+  gap: 8px;
+  padding: 10px 24px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.skill-card-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .skill-card {
   display: flex;
   align-items: center;
@@ -950,8 +963,11 @@ html, body {
 
 /* Skills panel */
 .mobile-device .skill-card {
-  padding: 10px;
+  padding: 12px;
   gap: 8px;
+}
+.mobile-device .skill-card-actions {
+  flex-direction: column;
 }
 .mobile-device .skill-info h4 {
   font-size: 13px;

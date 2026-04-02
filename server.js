@@ -1021,14 +1021,15 @@ function detectSkill(message) {
     const match = message.match(pattern);
     if (match) {
       const query = match[1]?.trim() || '';
+      const skillManagerId = loadedSkills.skills && isSkillActive('skills') ? 'skills' : 'upload';
       if (lower.includes('install') || lower.includes('instaliraj') || lower.includes('dodaj') || lower.includes('želim') || lower.includes('hocu') || lower.includes('hoću') || lower.includes('want')) {
         return {
-          id: 'upload',
+          id: skillManagerId,
           params: { task: message, action: 'install', slug: query || message }
         };
       }
       return {
-        id: 'upload',
+        id: skillManagerId,
         params: { task: message, action: 'search', query: query || message }
       };
     }
@@ -1036,6 +1037,7 @@ function detectSkill(message) {
 
   // === General trigger matching ===
   for (const [id, skill] of Object.entries(loadedSkills)) {
+    if (!isSkillActive(id)) continue;
     if (!skill.triggers || skill.triggers.length === 0) continue;
 
     for (const trigger of skill.triggers) {
@@ -1639,6 +1641,33 @@ app.get('/status', async (req, res) => {
 // ===== Dynamic Skills Loader =====
 const SKILLS_DIR = path.join(__dirname, 'skills');
 const loadedSkills = {};
+const skillsStatePath = path.join(DATA_DIR, 'skills-state.json');
+const disabledSkills = new Set();
+
+function loadSkillsState() {
+  try {
+    if (!fs.existsSync(skillsStatePath)) return;
+    const state = JSON.parse(fs.readFileSync(skillsStatePath, 'utf8'));
+    const disabled = Array.isArray(state.disabled) ? state.disabled : [];
+    disabledSkills.clear();
+    disabled.forEach(id => disabledSkills.add(String(id)));
+  } catch (err) {
+    console.error('Failed to load skills state:', err.message);
+  }
+}
+
+function saveSkillsState() {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(skillsStatePath, JSON.stringify({ disabled: [...disabledSkills] }, null, 2));
+  } catch (err) {
+    console.error('Failed to save skills state:', err.message);
+  }
+}
+
+function isSkillActive(skillId) {
+  return !disabledSkills.has(skillId);
+}
 
 function loadSingleSkill(dirName) {
   const skillPath = path.join(SKILLS_DIR, dirName, 'index.js');
@@ -1670,6 +1699,7 @@ function loadSkills() {
 }
 
 loadSkills();
+loadSkillsState();
 
 // Hot-reload endpoint — install + activate without restart
 app.post('/skills/reload/:id', (req, res) => {
@@ -1706,8 +1736,27 @@ app.get('/skills', (req, res) => {
     description: s.description || '',
     icon: s.icon || '🔧',
     triggers: s.triggers || [],
+    active: isSkillActive(id),
+    core: id === 'skills' || id === 'upload',
   }));
   res.json({ skills });
+});
+
+app.post('/skills/:id/enable', (req, res) => {
+  const id = req.params.id;
+  if (!loadedSkills[id]) return res.status(404).json({ error: `Skill '${id}' not found` });
+  disabledSkills.delete(id);
+  saveSkillsState();
+  res.json({ success: true, id, active: true });
+});
+
+app.post('/skills/:id/disable', (req, res) => {
+  const id = req.params.id;
+  if (!loadedSkills[id]) return res.status(404).json({ error: `Skill '${id}' not found` });
+  if (id === 'skills' || id === 'upload') return res.status(403).json({ error: `'${id}' is a core skill and cannot be disabled` });
+  disabledSkills.add(id);
+  saveSkillsState();
+  res.json({ success: true, id, active: false });
 });
 
 // ===== Skill Marketplace (ClawHub) =====
@@ -1795,6 +1844,12 @@ app.get('/marketplace', async (req, res) => {
 // Install from marketplace
 app.post('/marketplace/install/:slug', async (req, res) => {
   try {
+    const skillsManager = loadedSkills['skills'];
+    if (skillsManager?.handler?.install) {
+      const managerResult = await skillsManager.handler.install(req.params.slug, 'clawhub');
+      if (managerResult?.success) return res.json(managerResult);
+    }
+
     const skill = await fetchMarketplaceSkillBySlug(req.params.slug);
     if (!skill) return res.status(404).json({ error: `Skill '${req.params.slug}' not found on marketplace` });
     let content = skill.content;
@@ -1823,11 +1878,12 @@ app.post('/skills/update-all', async (req, res) => {
     
     try {
       // Check ClawHub for newer version
-      const response = await fetch(`https://clawhub.com/api/skills/${id}`, {
+      const response = await fetch(`${CLAWHUB_API_BASE}/skills/${id}`, {
         signal: AbortSignal.timeout(5000),
       });
       if (response.ok) {
-        const remote = await response.json();
+        const remotePayload = await response.json();
+        const remote = remotePayload.skill || remotePayload;
         const localVersion = skill.version || '1.0.0';
         const remoteVersion = remote.version || '1.0.0';
         
@@ -1909,6 +1965,7 @@ app.get('/shared/:id', (req, res) => {
 app.post('/skills/:id', async (req, res) => {
   const skill = loadedSkills[req.params.id];
   if (!skill) return res.status(404).json({ error: `Skill '${req.params.id}' not found` });
+  if (!isSkillActive(req.params.id)) return res.status(403).json({ error: `Skill '${req.params.id}' is disabled` });
 
   try {
     const result = await skill.handler.run(req.body);
@@ -1933,6 +1990,8 @@ app.delete('/skills/:id', (req, res) => {
 
   fs.rmSync(targetDir, { recursive: true });
   delete loadedSkills[id];
+  disabledSkills.delete(id);
+  saveSkillsState();
 
   // Remove from registry
   const registryPath = path.join(SKILLS_DIR, 'brain', 'skills-registry.json');
