@@ -216,6 +216,11 @@ const PROVIDER_BADGES = {
   ollama:      '🦙 LOCAL',
 };
 
+function getProviderBadge(provider) {
+  if (!provider) return '';
+  return PROVIDER_BADGES[provider] || `🤖 ${String(provider).toUpperCase()}`;
+}
+
 async function sendMessage() {
   const input = document.getElementById('chat-input');
   const message = input.value.trim();
@@ -307,9 +312,10 @@ async function sendMessage() {
               // Pokaži koji model je odgovorio
               const modelBadge = document.querySelector(`#${botMsgId} .model-badge`);
               if (!modelBadge) {
+                const usedProvider = data.provider || provider;
                 const badge = document.createElement('div');
                 badge.className = 'model-badge';
-                badge.textContent = `${PROVIDER_BADGES[provider] || provider} ${data.model}`;
+                badge.textContent = `${getProviderBadge(usedProvider)} ${data.model}`;
                 document.querySelector(`#${botMsgId} .msg-content-wrap`)?.appendChild(badge);
               }
             }
@@ -367,7 +373,7 @@ function addTypingIndicator(provider = '') {
   const div = document.createElement('div');
   div.className = 'message bot';
   div.id = id;
-  const badge = PROVIDER_BADGES[provider] || provider;
+  const badge = getProviderBadge(provider);
   div.innerHTML = `
     <div class="msg-avatar">🐾</div>
     <div class="msg-content">
@@ -674,7 +680,9 @@ async function refreshModels() {
     ]);
 
     const select = document.getElementById('model-select');
+    if (!select) return;
     select.innerHTML = '';
+    MODEL_PROVIDERS = {};
 
     // Ollama lokalni modeli (Railway)
     if (ollamaRes.status === 'fulfilled' && ollamaRes.value.ok) {

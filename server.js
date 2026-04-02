@@ -654,7 +654,7 @@ async function streamHuggingFace(message, model, system, res, history) {
       if (!line.startsWith('data: ')) continue;
       const data = line.slice(6).trim();
       if (data === '[DONE]') {
-        res.write(`data: ${JSON.stringify({ done: true, model: hfModel })}\n\n`);
+        res.write(`data: ${JSON.stringify({ done: true, model: hfModel, provider: 'huggingface' })}\n\n`);
         return;
       }
       try {
@@ -664,6 +664,8 @@ async function streamHuggingFace(message, model, system, res, history) {
       } catch {}
     }
   }
+
+  res.write(`data: ${JSON.stringify({ done: true, model: hfModel, provider: 'huggingface' })}\n\n`);
 }
 
 
@@ -742,7 +744,7 @@ async function chatOpenAICompat({ baseUrl, apiKey, model, message, system, maxTo
 }
 
 // ── Generička streaming funkcija za sve OpenAI-compat providere ─
-async function streamOpenAICompat({ baseUrl, apiKey, model, message, system, res: httpRes, history = [] }) {
+async function streamOpenAICompat({ baseUrl, apiKey, model, provider, message, system, res: httpRes, history = [] }) {
   const messages = [];
   if (system) messages.push({ role: 'system', content: system });
   if (history?.length) {
@@ -780,7 +782,7 @@ async function streamOpenAICompat({ baseUrl, apiKey, model, message, system, res
     for (const line of lines) {
       if (!line.startsWith('data: ')) continue;
       const data = line.slice(6).trim();
-      if (data === '[DONE]') { httpRes.write(`data: ${JSON.stringify({ done: true, model })}
+      if (data === '[DONE]') { httpRes.write(`data: ${JSON.stringify({ done: true, model, provider })}
 
 `); return; }
       try {
@@ -792,6 +794,8 @@ async function streamOpenAICompat({ baseUrl, apiKey, model, message, system, res
       } catch {}
     }
   }
+
+  httpRes.write(`data: ${JSON.stringify({ done: true, model, provider })}\n\n`);
 }
 
 // ── Provider dispatch funkcije ────────────────────────────────
@@ -1098,7 +1102,7 @@ app.post('/chat/stream', async (req, res) => {
           if (line.startsWith('data: ')) {
             const data = line.slice(6).trim();
             if (data === '[DONE]') {
-              res.write(`data: ${JSON.stringify({ done: true, model: groqModel })}\n\n`);
+              res.write(`data: ${JSON.stringify({ done: true, model: groqModel, provider: 'groq' })}\n\n`);
             } else {
               try {
                 const parsed = JSON.parse(data);
@@ -1112,20 +1116,15 @@ app.post('/chat/stream', async (req, res) => {
         }
       }
     } else if (provider === 'cerebras' && CONFIG.cerebrasKey) {
-      await streamOpenAICompat({ baseUrl: 'https://api.cerebras.ai/v1', apiKey: CONFIG.cerebrasKey, model: chatModel || 'llama-3.3-70b', message: chatMessage, system: enhancedSystem, res, history });
-      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      await streamOpenAICompat({ baseUrl: 'https://api.cerebras.ai/v1', apiKey: CONFIG.cerebrasKey, model: chatModel || 'llama-3.3-70b', provider: 'cerebras', message: chatMessage, system: enhancedSystem, res, history });
     } else if (provider === 'mistral' && CONFIG.mistralKey) {
-      await streamOpenAICompat({ baseUrl: 'https://api.mistral.ai/v1', apiKey: CONFIG.mistralKey, model: chatModel || 'mistral-small-latest', message: chatMessage, system: enhancedSystem, res, history });
-      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      await streamOpenAICompat({ baseUrl: 'https://api.mistral.ai/v1', apiKey: CONFIG.mistralKey, model: chatModel || 'mistral-small-latest', provider: 'mistral', message: chatMessage, system: enhancedSystem, res, history });
     } else if (provider === 'siliconflow' && CONFIG.siliconKey) {
-      await streamOpenAICompat({ baseUrl: 'https://api.siliconflow.cn/v1', apiKey: CONFIG.siliconKey, model: chatModel || 'Qwen/Qwen3-8B', message: chatMessage, system: enhancedSystem, res, history });
-      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      await streamOpenAICompat({ baseUrl: 'https://api.siliconflow.cn/v1', apiKey: CONFIG.siliconKey, model: chatModel || 'Qwen/Qwen3-8B', provider: 'siliconflow', message: chatMessage, system: enhancedSystem, res, history });
     } else if (provider === 'huggingface' && CONFIG.hfKey) {
       await streamHuggingFace(chatMessage, chatModel, enhancedSystem, res, history);
-      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
     } else if (provider === 'llm7') {
-      await streamOpenAICompat({ baseUrl: 'https://llm7.io/v1', apiKey: null, model: chatModel || 'deepseek-chat', message: chatMessage, system: enhancedSystem, res, history });
-      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      await streamOpenAICompat({ baseUrl: 'https://llm7.io/v1', apiKey: null, model: chatModel || 'deepseek-chat', provider: 'llm7', message: chatMessage, system: enhancedSystem, res, history });
     } else {
       // Non-streaming fallback → uvijek završi na LLM7
       let result;
@@ -1139,7 +1138,7 @@ app.post('/chat/stream', async (req, res) => {
           else                   result = await chatLLM7(chatMessage, chatModel, enhancedSystem);
         } catch { result = await chatLLM7(chatMessage, 'deepseek-chat', enhancedSystem); }
       }
-      res.write(`data: ${JSON.stringify({ content: result.response, done: true, model: result.model })}\n\n`);
+      res.write(`data: ${JSON.stringify({ content: result.response, done: true, model: result.model, provider: result.provider || provider })}\n\n`);
     }
 
     res.end();
