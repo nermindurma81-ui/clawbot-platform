@@ -1,0 +1,15 @@
+{
+  "id": "apk-builder",
+  "name": "APK Builder",
+  "version": "1.0.0",
+  "description": "Android APK/AAB build guidance from idea to signed release",
+  "icon": "\ud83d\udcf1",
+  "triggers": [
+    "apk",
+    "android build",
+    "gradle",
+    "play store release"
+  ],
+  "endpoint": "/skills/apk-builder",
+  "method": "POST"
+}

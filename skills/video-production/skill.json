@@ -1,0 +1,17 @@
+{
+  "id": "video-production",
+  "name": "Video Production Director",
+  "version": "1.0.0",
+  "description": "Plan, script, shot-list, and post-production pipelines for real video projects",
+  "icon": "\ud83c\udfac",
+  "triggers": [
+    "video production",
+    "edit video",
+    "shot list",
+    "davinci",
+    "premiere",
+    "youtube video"
+  ],
+  "endpoint": "/skills/video-production",
+  "method": "POST"
+}

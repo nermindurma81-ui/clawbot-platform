@@ -1,0 +1,15 @@
+{
+  "id": "library-research",
+  "name": "Library & Research Assistant",
+  "version": "1.0.0",
+  "description": "Build learning paths from official docs, books, and repositories",
+  "icon": "\ud83d\udcda",
+  "triggers": [
+    "library",
+    "learning path",
+    "docs research",
+    "reference list"
+  ],
+  "endpoint": "/skills/library-research",
+  "method": "POST"
+}

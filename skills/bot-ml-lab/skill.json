@@ -1,0 +1,15 @@
+{
+  "id": "bot-ml-lab",
+  "name": "Bot ML Lab",
+  "version": "1.0.0",
+  "description": "Machine-learning pipelines for chatbot training/evaluation",
+  "icon": "\ud83e\udd16",
+  "triggers": [
+    "train bot",
+    "machine learning bot",
+    "rag pipeline",
+    "fine tune"
+  ],
+  "endpoint": "/skills/bot-ml-lab",
+  "method": "POST"
+}

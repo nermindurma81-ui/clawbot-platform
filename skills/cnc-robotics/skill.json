@@ -1,0 +1,16 @@
+{
+  "id": "cnc-robotics",
+  "name": "CNC & Robotics Engineer",
+  "version": "1.0.0",
+  "description": "CNC workflow, G-code planning, and robotics integration support",
+  "icon": "\ud83d\udee0\ufe0f",
+  "triggers": [
+    "cnc",
+    "gcode",
+    "robotics",
+    "ros2",
+    "linuxcnc"
+  ],
+  "endpoint": "/skills/cnc-robotics",
+  "method": "POST"
+}

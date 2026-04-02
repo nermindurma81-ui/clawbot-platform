@@ -1,0 +1,15 @@
+{
+  "id": "construction-planning",
+  "name": "Construction Planner",
+  "version": "1.0.0",
+  "description": "Construction BOQ planning, phases, and site execution checklists",
+  "icon": "\ud83c\udfd7\ufe0f",
+  "triggers": [
+    "construction",
+    "boq",
+    "site plan",
+    "civil engineering"
+  ],
+  "endpoint": "/skills/construction-planning",
+  "method": "POST"
+}

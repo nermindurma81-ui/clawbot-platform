@@ -1,0 +1,16 @@
+{
+  "id": "music-production",
+  "name": "Music Production Lab",
+  "version": "1.0.0",
+  "description": "Song arrangement, sound design, mixing and release workflow",
+  "icon": "\ud83c\udfb5",
+  "triggers": [
+    "music production",
+    "mixing",
+    "mastering",
+    "beat making",
+    "arrangement"
+  ],
+  "endpoint": "/skills/music-production",
+  "method": "POST"
+}

@@ -1,0 +1,15 @@
+{
+  "id": "vibe-coding-pro",
+  "name": "Vibe Coding Pro",
+  "version": "1.0.0",
+  "description": "Rapid product iteration with spec->prototype->deploy workflow",
+  "icon": "\ud83e\udde0",
+  "triggers": [
+    "vibe coding",
+    "ship fast",
+    "mvp sprint",
+    "prototype app"
+  ],
+  "endpoint": "/skills/vibe-coding-pro",
+  "method": "POST"
+}

@@ -1,0 +1,16 @@
+{
+  "id": "image-studio",
+  "name": "Image Studio",
+  "version": "1.0.0",
+  "description": "Image generation, retouch, style references, and asset pipelines",
+  "icon": "\ud83d\uddbc\ufe0f",
+  "triggers": [
+    "image prompt",
+    "generate image",
+    "midjourney",
+    "stable diffusion",
+    "photoshop"
+  ],
+  "endpoint": "/skills/image-studio",
+  "method": "POST"
+}

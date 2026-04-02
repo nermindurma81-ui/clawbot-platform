@@ -1,0 +1,15 @@
+{
+  "id": "ui-design-pro",
+  "name": "UI Design Pro",
+  "version": "1.0.0",
+  "description": "Production UI/UX workflows with components, tokens, and accessibility",
+  "icon": "\ud83c\udfa8",
+  "triggers": [
+    "ui design",
+    "figma",
+    "design system",
+    "ux review"
+  ],
+  "endpoint": "/skills/ui-design-pro",
+  "method": "POST"
+}

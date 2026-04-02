@@ -1,0 +1,15 @@
+{
+  "id": "software-architecture",
+  "name": "Software Architecture",
+  "version": "1.0.0",
+  "description": "Architectural decisions, system diagrams, and scalability playbooks",
+  "icon": "\ud83c\udfdb\ufe0f",
+  "triggers": [
+    "architecture",
+    "system design",
+    "microservices",
+    "event driven"
+  ],
+  "endpoint": "/skills/software-architecture",
+  "method": "POST"
+}
