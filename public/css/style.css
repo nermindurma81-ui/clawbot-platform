@@ -757,14 +757,14 @@ html, body {
   font-size: 0.85rem;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 1024px) {
   .config-cards {
     grid-template-columns: 1fr;
   }
 }
 
 /* ===== Mobile Responsive ===== */
-@media (max-width: 768px) {
+@media (max-width: 1024px) {
   /* App layout: stack vertically, hide sidebar */
   #app.screen.active {
     flex-direction: column;
@@ -1158,7 +1158,7 @@ body.light-theme {
   font-weight: normal;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 1024px) {
   .compare-results {
     grid-template-columns: 1fr;
   }

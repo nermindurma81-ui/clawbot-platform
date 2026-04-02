@@ -133,7 +133,7 @@ function showPanel(name) {
   if (name === 'analytics') loadAnalytics();
 
   // Close sidebar on mobile
-  if (window.innerWidth <= 768) {
+  if (window.innerWidth <= 1024) {
     document.querySelector('.sidebar').classList.remove('open');
     document.getElementById('sidebar-overlay').classList.remove('show');
   }
