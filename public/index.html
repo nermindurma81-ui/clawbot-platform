@@ -28,19 +28,19 @@
         <button class="tab" onclick="showAuthTab('signup')">Sign Up</button>
       </div>
 
-      <form id="login-form" class="auth-form" onsubmit="handleLogin(event)">
+      <form id="login-form" class="auth-form" onsubmit="handleLogin(event)" action="javascript:void(0)">
         <input type="email" id="login-email" placeholder="Email" required>
         <input type="password" id="login-password" placeholder="Password" required>
         <button type="submit" class="btn-primary">Login</button>
       </form>
 
-      <form id="signup-form" class="auth-form hidden" onsubmit="handleSignup(event)">
+      <form id="signup-form" class="auth-form hidden" onsubmit="handleSignup(event)" action="javascript:void(0)">
         <input type="email" id="signup-email" placeholder="Email" required>
         <input type="password" id="signup-password" placeholder="Password" required>
         <button type="submit" class="btn-primary">Create Account</button>
       </form>
 
-      <button class="btn-ghost" onclick="skipAuth()">Continue without account →</button>
+      <button class="btn-ghost" onclick="skipAuth()" type="button">Continue without account →</button>
       <div id="auth-error" class="error-msg hidden"></div>
     </div>
   </div>
