@@ -764,6 +764,69 @@ html, body {
 }
 
 /* ===== Mobile Responsive ===== */
+/* Touch device detection via JS class */
+.mobile-device .sidebar {
+  position: fixed;
+  top: 0;
+  left: -100%;
+  width: 80%;
+  max-width: 280px;
+  height: 100dvh;
+  z-index: 200;
+  transition: left 0.3s ease;
+  background: var(--bg-secondary);
+  display: flex;
+}
+.mobile-device .sidebar.open { left: 0; box-shadow: 4px 0 20px rgba(0,0,0,0.5); }
+.mobile-device .sidebar-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 199; }
+.mobile-device .sidebar-overlay.show { display: block; }
+.mobile-device .main-content { width: 100%; flex: 1; overflow: hidden; }
+.mobile-device .panel { height: 100%; width: 100%; }
+.mobile-device .panel-header { padding: 10px 12px; flex-shrink: 0; }
+.mobile-device .panel-header h2 { font-size: 15px; }
+.mobile-device .chat-messages { padding: 10px; flex: 1; overflow-y: auto; }
+.mobile-device .message { max-width: 92%; gap: 6px; }
+.mobile-device .msg-avatar { width: 28px; height: 28px; font-size: 14px; flex-shrink: 0; }
+.mobile-device .msg-content { padding: 8px 12px; font-size: 15px; line-height: 1.5; }
+.mobile-device .welcome-msg { padding: 20px 12px; }
+.mobile-device .welcome-msg h3 { font-size: 18px; }
+.mobile-device .quick-prompts { flex-direction: column; align-items: stretch; }
+.mobile-device .chip { width: 100%; text-align: center; padding: 10px 14px; font-size: 14px; }
+.mobile-device .chat-input-area { padding: 6px 10px; gap: 6px; flex-shrink: 0; border-top: 1px solid var(--border); background: var(--bg-secondary); }
+.mobile-device #chat-input { font-size: 16px !important; padding: 10px !important; min-height: 40px; max-height: 100px; }
+.mobile-device .btn-send { width: 40px; height: 40px; font-size: 16px; flex-shrink: 0; }
+.mobile-device .btn-icon { font-size: 18px; padding: 6px; }
+.mobile-device .model-dropdown { font-size: 12px; padding: 4px 8px; max-width: 120px; }
+.mobile-device .header-actions { gap: 4px; flex-wrap: nowrap; }
+.mobile-device .header-actions .btn-sm { padding: 4px 8px; font-size: 11px; }
+.mobile-device .skill-card { padding: 10px; gap: 8px; }
+.mobile-device .skill-info h4 { font-size: 13px; }
+.mobile-device .skill-info p { font-size: 11px; }
+.mobile-device .settings-form { padding: 12px; }
+.mobile-device .setting-group input,
+.mobile-device .setting-group select,
+.mobile-device .setting-group textarea { font-size: 16px !important; padding: 10px !important; }
+.mobile-device .auth-container { width: 92%; max-width: 360px; padding: 24px 20px; }
+.mobile-device .auth-container .logo { font-size: 48px; }
+.mobile-device .auth-container h1 { font-size: 20px; }
+.mobile-device .modal-content { width: 96%; max-height: 92vh; padding: 14px; margin: 4vh auto; }
+.mobile-device .install-tabs { flex-wrap: wrap; }
+.mobile-device .install-tabs .tab { flex: 1; text-align: center; font-size: 11px; padding: 6px; }
+.mobile-device .models-grid { grid-template-columns: 1fr !important; padding: 10px; }
+.mobile-device .status-grid { grid-template-columns: 1fr 1fr !important; gap: 6px; padding: 10px; }
+.mobile-device .status-card { padding: 10px; }
+.mobile-device .status-card h4 { font-size: 12px; }
+.mobile-device .analytics-grid { grid-template-columns: 1fr 1fr; padding: 10px; gap: 8px; }
+.mobile-device .stat-card { padding: 12px; }
+.mobile-device .stat-number { font-size: 22px; }
+.mobile-device .compare-container { padding: 10px; }
+.mobile-device .compare-results { grid-template-columns: 1fr; }
+.mobile-device .config-section { padding: 12px; }
+.mobile-device .config-cards { grid-template-columns: 1fr; gap: 8px; }
+.mobile-device .history-list { padding: 10px; }
+.mobile-device ::-webkit-scrollbar { width: 3px; }
+
+/* Also apply via media query as fallback */
 @media (max-width: 1024px) {
   /* App layout: stack vertically, hide sidebar */
   #app.screen.active {

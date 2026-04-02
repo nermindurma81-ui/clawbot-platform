@@ -9,10 +9,20 @@ let isDarkTheme = localStorage.getItem('clawbot_theme') !== 'light';
 
 // ===== Init =====
 document.addEventListener('DOMContentLoaded', () => {
+  // Force mobile styles on touch devices
+  const isMobile = window.innerWidth <= 1024 || ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  if (isMobile) document.body.classList.add('mobile-device');
+
   applyTheme();
   if (authToken) checkAuth();
   refreshStatus();
   refreshModels();
+});
+
+// Re-check on resize
+window.addEventListener('resize', () => {
+  const isMobile = window.innerWidth <= 1024 || ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  document.body.classList.toggle('mobile-device', isMobile);
 });
 
 // ===== Theme Toggle =====
