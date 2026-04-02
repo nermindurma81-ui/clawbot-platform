@@ -839,6 +839,33 @@ function saveSettings() {
 let providerSettingsCache = {};
 let providerModelsCache = {};
 
+async function loadProviderCatalogsForSettings() {
+  try {
+    const [provRes, ollamaRes] = await Promise.allSettled([
+      fetch(`${API}/models/providers`),
+      fetch(`${API}/ollama/api/tags`),
+    ]);
+
+    const nextCache = {};
+
+    if (provRes.status === 'fulfilled' && provRes.value.ok) {
+      const provData = await provRes.value.json();
+      (provData.providers || []).forEach(provider => {
+        nextCache[provider.id] = provider.models || [];
+      });
+    }
+
+    if (ollamaRes.status === 'fulfilled' && ollamaRes.value.ok) {
+      const ollamaData = await ollamaRes.value.json();
+      nextCache.ollama = (ollamaData.models || []).map(m => ({ id: m.name }));
+    }
+
+    providerModelsCache = nextCache;
+  } catch {
+    providerModelsCache = providerModelsCache || {};
+  }
+}
+
 function renderProviderAvailableModels(providerId) {
   const host = document.getElementById('setting-provider-available-models');
   if (!host) return;
@@ -859,14 +886,26 @@ function populateProviderConfigForm() {
   const tokenInput = document.getElementById('setting-provider-token');
   const modelsInput = document.getElementById('setting-provider-models');
   const cfg = providerSettingsCache?.[providerId] || {};
-  if (tokenInput) tokenInput.value = '';
-  if (modelsInput) modelsInput.value = (cfg.custom_models || []).join('\n');
+  if (tokenInput) {
+    tokenInput.value = '';
+    tokenInput.disabled = providerId === 'ollama';
+    tokenInput.placeholder = providerId === 'ollama' ? 'Ollama does not use API token' : 'API token...';
+  }
+  if (modelsInput) {
+    modelsInput.value = (cfg.custom_models || []).join('\n');
+    modelsInput.disabled = providerId === 'ollama';
+    modelsInput.placeholder = providerId === 'ollama' ? 'Ollama uses local pulled models' : 'model-id-1\nmodel-id-2';
+  }
   renderProviderAvailableModels(providerId);
 }
 
 async function saveProviderSettings() {
   const providerId = document.getElementById('setting-provider-select')?.value;
   if (!providerId) return;
+  if (providerId === 'ollama') {
+    alert('ℹ️ Ollama uses local pulled models. There is no token/custom model save for Ollama.');
+    return;
+  }
   const token = document.getElementById('setting-provider-token')?.value?.trim() || '';
   const customModelsRaw = document.getElementById('setting-provider-models')?.value || '';
   const custom_models = customModelsRaw
@@ -926,6 +965,8 @@ async function loadSettings() {
     }
   } catch {}
   await loadProviderSettings();
+  await loadProviderCatalogsForSettings();
+  populateProviderConfigForm();
 }
 
 // ===== Skills Management =====
