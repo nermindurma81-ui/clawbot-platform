@@ -191,6 +191,14 @@ async function sendMessage() {
   const botMsgId = addMessage('bot', '');
   const botContent = document.querySelector(`#${botMsgId} .msg-content`);
 
+  // Build chat history for context
+  const chatHistory = [];
+  document.querySelectorAll('.message').forEach(msg => {
+    const role = msg.classList.contains('user') ? 'user' : 'assistant';
+    const content = msg.querySelector('.msg-content')?.textContent || '';
+    if (content && content.length > 0) chatHistory.push({ role, content });
+  });
+
   try {
     const res = await fetch(`${API}/chat/stream`, {
       method: 'POST',
@@ -198,7 +206,7 @@ async function sendMessage() {
         'Content-Type': 'application/json',
         ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
       },
-      body: JSON.stringify({ message, model }),
+      body: JSON.stringify({ message, model, history: chatHistory.slice(-10) }),
     });
 
     // Remove typing indicator once response starts
@@ -276,9 +284,13 @@ function addMessage(role, content) {
   const div = document.createElement('div');
   div.className = `message ${role}`;
   div.id = id;
+  const copyBtn = role === 'bot' ? `<button class="btn-copy" onclick="copyMessage(this)" title="Copy">📋</button>` : '';
   div.innerHTML = `
     <div class="msg-avatar">${role === 'user' ? '👤' : '🐾'}</div>
-    <div class="msg-content">${formatMessage(content)}</div>
+    <div class="msg-content-wrap">
+      <div class="msg-content">${formatMessage(content)}</div>
+      ${copyBtn}
+    </div>
   `;
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
@@ -882,6 +894,141 @@ function saveMobileSettings() {
   
   saveSettings();
   toggleSettingsSheet();
+}
+
+// ===== Copy Button =====
+function copyMessage(btn) {
+  const content = btn.closest('.message').querySelector('.msg-content');
+  const text = content.innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = '✅';
+    setTimeout(() => btn.textContent = '📋', 1500);
+  });
+}
+
+// ===== Share Chat =====
+async function shareChat() {
+  const messages = [];
+  document.querySelectorAll('.message').forEach(msg => {
+    const role = msg.classList.contains('user') ? 'user' : 'assistant';
+    const content = msg.querySelector('.msg-content')?.innerText || '';
+    if (content) messages.push({ role, content });
+  });
+
+  if (messages.length === 0) return alert('No messages to share');
+
+  try {
+    const res = await fetch(`${API}/chats/share`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages, title: 'ClawBot Chat' }),
+    });
+    const data = await res.json();
+    if (data.url) {
+      const shareUrl = window.location.origin + data.url;
+      navigator.clipboard.writeText(shareUrl);
+      alert('Link copied: ' + shareUrl);
+    }
+  } catch (err) {
+    alert('Share failed: ' + err.message);
+  }
+}
+
+// ===== Skill Marketplace =====
+async function loadMarketplace(query = '') {
+  try {
+    const url = query ? `${API}/marketplace?q=${encodeURIComponent(query)}` : `${API}/marketplace`;
+    const res = await fetch(url);
+    const data = await res.json();
+    return data.skills || [];
+  } catch {
+    return [];
+  }
+}
+
+async function installFromMarketplace(slug) {
+  try {
+    const res = await fetch(`${API}/marketplace/install/${slug}`, { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      alert(`✅ ${data.name || slug} installed!`);
+      refreshSkills();
+    } else {
+      alert(`❌ ${data.error}`);
+    }
+  } catch (err) {
+    alert(`❌ ${err.message}`);
+  }
+}
+
+// ===== Custom Commands =====
+async function loadCommands() {
+  try {
+    const res = await fetch(`${API}/commands`);
+    const data = await res.json();
+    return data.commands || {};
+  } catch {
+    return {};
+  }
+}
+
+async function saveCommand(name, action) {
+  try {
+    const res = await fetch(`${API}/commands`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, action }),
+    });
+    const data = await res.json();
+    return data.success;
+  } catch {
+    return false;
+  }
+}
+
+// ===== Auto-Update Skills =====
+async function updateAllSkills() {
+  try {
+    const res = await fetch(`${API}/skills/update-all`, { method: 'POST' });
+    const data = await res.json();
+    const updated = data.results?.filter(r => r.updated) || [];
+    if (updated.length > 0) {
+      alert(`✅ Updated ${updated.length} skills!`);
+      refreshSkills();
+    } else {
+      alert('All skills are up to date');
+    }
+  } catch (err) {
+    alert('Update failed: ' + err.message);
+  }
+}
+
+// ===== Marketplace UI =====
+async function loadMarketplaceUI() {
+  const container = document.getElementById('marketplace-list');
+  container.innerHTML = '<div class="loading">Loading marketplace...</div>';
+  
+  const skills = await loadMarketplace();
+  
+  if (skills.length === 0) {
+    container.innerHTML = '<p style="text-align:center;color:var(--text-secondary)">No skills found</p>';
+    return;
+  }
+  
+  container.innerHTML = skills.map(s => `
+    <div class="marketplace-item">
+      <div class="mi-header">
+        <span class="mi-icon">${s.icon || '🔧'}</span>
+        <div>
+          <div class="mi-name">${s.name || s.id}</div>
+          <div class="mi-desc">${s.description || ''}</div>
+        </div>
+      </div>
+      <button class="btn-sm btn-primary" onclick="installFromMarketplace('${s.slug || s.id}')">
+        ${s.installed ? '✅ Installed' : '⬇️ Install'}
+      </button>
+    </div>
+  `).join('');
 }
   if (!bytes) return 'Unknown';
   const gb = bytes / (1024 ** 3);

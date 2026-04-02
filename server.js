@@ -87,8 +87,22 @@ app.use(authMiddleware);
 app.post('/auth/signup', async (req, res) => {
   if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
   const { email, password } = req.body;
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { emailRedirectTo: undefined }
+  });
   if (error) return res.status(400).json({ error: error.message });
+
+  // If no session (email confirmation required), try to auto-login
+  if (!data.session) {
+    try {
+      const loginResult = await supabase.auth.signInWithPassword({ email, password });
+      if (loginResult.data.session) {
+        return res.json({ user: loginResult.data.user, session: loginResult.data.session });
+      }
+    } catch {}
+  }
   res.json({ user: data.user, session: data.session });
 });
 
@@ -523,7 +537,7 @@ app.post('/chat', async (req, res) => {
 
 // ===== Streaming Chat (SSE) =====
 app.post('/chat/stream', async (req, res) => {
-  const { message, model, system } = req.body;
+  const { message, model, system, history } = req.body;
   if (!message) return res.status(400).json({ error: 'Message required' });
 
   // Rate limit check
@@ -586,6 +600,17 @@ app.post('/chat/stream', async (req, res) => {
       const groqModel = chatModel && chatModel.startsWith('llama') ? chatModel : 'llama-3.1-8b-instant';
       const messages = [];
       if (enhancedSystem) messages.push({ role: 'system', content: enhancedSystem });
+      
+      // Add chat history (last 10 messages for context)
+      if (history && Array.isArray(history)) {
+        const recentHistory = history.slice(-10);
+        for (const h of recentHistory) {
+          if (h.role && h.content) {
+            messages.push({ role: h.role, content: h.content.substring(0, 500) });
+          }
+        }
+      }
+      
       messages.push({ role: 'user', content: chatMessage });
 
       const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -948,6 +973,139 @@ app.get('/skills', (req, res) => {
     triggers: s.triggers || [],
   }));
   res.json({ skills });
+});
+
+// ===== Skill Marketplace (ClawHub) =====
+app.get('/marketplace', async (req, res) => {
+  const query = req.query.q || '';
+  const limit = parseInt(req.query.limit) || 20;
+  
+  try {
+    const url = query 
+      ? `https://clawhub.com/api/skills?q=${encodeURIComponent(query)}&limit=${limit}`
+      : `https://clawhub.com/api/skills?limit=${limit}`;
+    const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    const data = await response.json();
+    res.json({ skills: data.skills || [], source: 'clawhub' });
+  } catch {
+    // Fallback: return installed skills
+    const skills = Object.entries(loadedSkills).map(([id, s]) => ({
+      id, name: s.name || id, description: s.description || '',
+      icon: s.icon || '🔧', triggers: s.triggers || [], installed: true,
+    }));
+    res.json({ skills, source: 'local' });
+  }
+});
+
+// Install from marketplace
+app.post('/marketplace/install/:slug', async (req, res) => {
+  try {
+    const response = await fetch(`https://clawhub.com/api/skills/${encodeURIComponent(req.params.slug)}`, {
+      signal: AbortSignal.timeout(10000),
+    });
+    const skill = await response.json();
+    const content = skill.content || skill.skill_md;
+    if (!content) return res.status(404).json({ error: 'Skill content not found' });
+    
+    const uploadSkill = loadedSkills['upload'];
+    if (!uploadSkill) return res.status(500).json({ error: 'Upload skill not loaded' });
+    
+    const result = await uploadSkill.handler.installSkillMd(content, 'skill.md');
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ===== Auto-Update Skills =====
+app.post('/skills/update-all', async (req, res) => {
+  const results = [];
+  
+  for (const [id, skill] of Object.entries(loadedSkills)) {
+    if (id === 'upload' || id === 'skills') continue; // Skip core skills
+    
+    try {
+      // Check ClawHub for newer version
+      const response = await fetch(`https://clawhub.com/api/skills/${id}`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (response.ok) {
+        const remote = await response.json();
+        const localVersion = skill.version || '1.0.0';
+        const remoteVersion = remote.version || '1.0.0';
+        
+        if (remoteVersion !== localVersion && (remote.content || remote.skill_md)) {
+          const uploadSkill = loadedSkills['upload'];
+          await uploadSkill.handler.installSkillMd(remote.content || remote.skill_md, 'skill.md');
+          results.push({ id, updated: true, from: localVersion, to: remoteVersion });
+        } else {
+          results.push({ id, updated: false, version: localVersion });
+        }
+      }
+    } catch {
+      results.push({ id, updated: false, error: 'check failed' });
+    }
+  }
+  
+  res.json({ success: true, results });
+});
+
+// ===== Custom Commands =====
+const customCommandsPath = path.join(DATA_DIR, 'commands.json');
+
+app.get('/commands', (req, res) => {
+  if (!fs.existsSync(customCommandsPath)) return res.json({ commands: {} });
+  res.json({ commands: JSON.parse(fs.readFileSync(customCommandsPath)) });
+});
+
+app.post('/commands', (req, res) => {
+  const { name, action } = req.body;
+  if (!name || !action) return res.status(400).json({ error: 'Name and action required' });
+  
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  let commands = {};
+  if (fs.existsSync(customCommandsPath)) {
+    commands = JSON.parse(fs.readFileSync(customCommandsPath));
+  }
+  commands[name.toLowerCase()] = action;
+  fs.writeFileSync(customCommandsPath, JSON.stringify(commands, null, 2));
+  res.json({ success: true, command: name, action });
+});
+
+app.delete('/commands/:name', (req, res) => {
+  if (!fs.existsSync(customCommandsPath)) return res.json({ success: true });
+  const commands = JSON.parse(fs.readFileSync(customCommandsPath));
+  delete commands[req.params.name.toLowerCase()];
+  fs.writeFileSync(customCommandsPath, JSON.stringify(commands, null, 2));
+  res.json({ success: true });
+});
+
+// ===== Share Chat =====
+const sharedChatsPath = path.join(DATA_DIR, 'shared-chats.json');
+
+app.post('/chats/share', (req, res) => {
+  const { messages, title } = req.body;
+  if (!messages || !Array.isArray(messages)) return res.status(400).json({ error: 'Messages required' });
+  
+  const id = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+  let shared = {};
+  if (fs.existsSync(sharedChatsPath)) {
+    shared = JSON.parse(fs.readFileSync(sharedChatsPath));
+  }
+  shared[id] = { title: title || 'Shared Chat', messages, created: new Date().toISOString() };
+  
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(sharedChatsPath, JSON.stringify(shared, null, 2));
+  
+  res.json({ success: true, id, url: `/shared/${id}` });
+});
+
+app.get('/shared/:id', (req, res) => {
+  if (!fs.existsSync(sharedChatsPath)) return res.status(404).json({ error: 'Not found' });
+  const shared = JSON.parse(fs.readFileSync(sharedChatsPath));
+  const chat = shared[req.params.id];
+  if (!chat) return res.status(404).json({ error: 'Not found' });
+  res.json(chat);
 });
 
 // Run a skill

@@ -109,6 +109,7 @@
               <option value="llama-3.1-8b-instant">Llama 3.1 8B</option>
               <option value="llama-3.1-70b-versatile">Llama 3.1 70B</option>
             </select>
+            <button class="btn-share" onclick="shareChat()" title="Share chat">🔗 Share</button>
             <button class="btn-sm" onclick="newChat()" title="New Chat">➕</button>
             <button class="btn-sm" onclick="toggleTheme()" title="Theme" id="theme-btn">🌙</button>
           </div>
@@ -212,6 +213,7 @@
           <h2>⚡ Skills</h2>
           <div class="header-actions">
             <button class="btn-sm" onclick="refreshSkills()">Refresh</button>
+            <button class="btn-sm" onclick="updateAllSkills()">🔄 Update</button>
             <button class="btn-sm btn-primary" onclick="showInstallModal()">+ Install</button>
           </div>
         </div>
@@ -227,6 +229,7 @@
               <button class="tab active" onclick="showInstallTab('paste')">Paste skill.md</button>
               <button class="tab" onclick="showInstallTab('url')">From URL</button>
               <button class="tab" onclick="showInstallTab('search')">Search</button>
+              <button class="tab" onclick="showInstallTab('marketplace')">🏪 Market</button>
             </div>
 
             <div id="install-paste" class="install-tab-content">
@@ -253,6 +256,12 @@ return { output: 'Hello!' }
               <input type="text" id="skill-search-input" placeholder="Search skills..." onkeyup="if(event.key==='Enter')searchSkills()">
               <button class="btn-primary" onclick="searchSkills()">Search ClawHub</button>
               <div id="search-results" class="search-results"></div>
+            </div>
+
+            <div id="install-marketplace" class="install-tab-content hidden">
+              <div id="marketplace-list" class="marketplace-list">
+                <button class="btn-primary" onclick="loadMarketplaceUI()" style="width:100%">🏪 Browse Marketplace</button>
+              </div>
             </div>
 
             <div id="install-result" class="install-result hidden"></div>

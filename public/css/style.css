@@ -1568,6 +1568,91 @@ code:not(pre code) {
   color: var(--text-secondary);
 }
 
+/* ===== Copy Button ===== */
+.btn-copy {
+  background: none;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px;
+  opacity: 0.5;
+  transition: opacity 0.2s;
+  position: absolute;
+  top: 4px;
+  right: 4px;
+}
+
+.btn-copy:hover { opacity: 1; }
+
+.msg-content-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Share button */
+.btn-share {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all 0.2s;
+}
+
+.btn-share:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Marketplace */
+.marketplace-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.marketplace-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.mi-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.mi-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.mi-name {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.mi-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
 /* ===== Bottom Navigation (Mobile) ===== */
 .bottom-nav {
   display: none;
