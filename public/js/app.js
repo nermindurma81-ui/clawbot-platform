@@ -45,9 +45,9 @@ function applyTheme() {
 }
 
 // ===== Auth =====
-function showAuthTab(tab) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  event.target.classList.add('active');
+function showAuthTab(tab, btnEl = null) {
+  document.querySelectorAll('.auth-box > .tabs .tab').forEach(t => t.classList.remove('active'));
+  if (btnEl) btnEl.classList.add('active');
   document.getElementById('login-form').classList.toggle('hidden', tab !== 'login');
   document.getElementById('signup-form').classList.toggle('hidden', tab !== 'signup');
   document.getElementById('auth-error').classList.add('hidden');

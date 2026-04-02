@@ -8,6 +8,27 @@ const CLAWHUB_API = 'https://registry.clawhub.com/api';
 const GITHUB_RAW = 'https://raw.githubusercontent.com/openclaw/skills/main/skills';
 const SERVER_URL = process.env.SERVER_URL || 'http://localhost:' + (process.env.PORT || 3000);
 
+function normalizeSkillId(raw) {
+  const slug = String(raw || '').trim();
+  if (!slug || slug === '.' || slug === '..') return null;
+  if (!/^[a-zA-Z0-9._-]+$/.test(slug)) return null;
+  return slug;
+}
+
+function resolveSkillDir(slug) {
+  const targetDir = path.resolve(SKILLS_DIR, slug);
+  const rootDir = path.resolve(SKILLS_DIR) + path.sep;
+  if (!targetDir.startsWith(rootDir)) return null;
+  return targetDir;
+}
+
+function isSafeRelativePath(filePath) {
+  const rel = String(filePath || '').replace(/\\/g, '/');
+  if (!rel || rel.startsWith('/') || rel.includes('\0')) return false;
+  const normalized = path.posix.normalize(rel);
+  return normalized && normalized !== '.' && !normalized.startsWith('../');
+}
+
 const SKILL = {
   id: 'skills',
   name: 'Skill Manager',
@@ -93,9 +114,11 @@ const SKILL = {
       return this.installFromGitHub(slug);
     }
 
+    const safeSlug = normalizeSkillId(slug);
+
     // Try ClawHub first
     try {
-      const res = await fetch(`${CLAWHUB_API}/skills/${slug}`, {
+      const res = await fetch(`${CLAWHUB_API}/skills/${safeSlug || slug}`, {
         signal: AbortSignal.timeout(10000),
       });
       const data = await res.json();
@@ -107,12 +130,15 @@ const SKILL = {
 
     // Try GitHub openclaw/skills repo
     try {
-      const res = await fetch(`${GITHUB_RAW}/${slug}/skill.json`, {
+      if (!safeSlug) {
+        return { error: `Invalid skill slug '${slug}'` };
+      }
+      const res = await fetch(`${GITHUB_RAW}/${safeSlug}/skill.json`, {
         signal: AbortSignal.timeout(10000),
       });
       if (res.ok) {
         const meta = await res.json();
-        return this.installFromGitHubDir(slug, meta);
+        return this.installFromGitHubDir(safeSlug, meta);
       }
     } catch {}
 
@@ -129,9 +155,11 @@ const SKILL = {
 
     const repo = match[1];
     const skillPath = match[2] || '';
-    const skillName = skillPath ? skillPath.split('/').pop() : repo.split('/')[1];
+    const skillName = normalizeSkillId(skillPath ? skillPath.split('/').pop() : repo.split('/')[1]);
+    if (!skillName) return { error: 'Invalid skill name from GitHub URL' };
 
-    const targetDir = path.join(SKILLS_DIR, skillName);
+    const targetDir = resolveSkillDir(skillName);
+    if (!targetDir) return { error: 'Unsafe target path' };
 
     if (fs.existsSync(targetDir)) {
       return { error: `Skill '${skillName}' already installed. Remove it first.` };
@@ -172,8 +200,10 @@ const SKILL = {
   },
 
   async installFromClawHub(skill) {
-    const skillName = skill.slug || skill.id;
-    const targetDir = path.join(SKILLS_DIR, skillName);
+    const skillName = normalizeSkillId(skill.slug || skill.id);
+    if (!skillName) return { error: 'Invalid skill id from ClawHub' };
+    const targetDir = resolveSkillDir(skillName);
+    if (!targetDir) return { error: 'Unsafe target path' };
 
     if (fs.existsSync(targetDir)) {
       return { error: `Skill '${skillName}' already installed` };
@@ -197,8 +227,11 @@ const SKILL = {
       for (const file of skill.files) {
         try {
           const res = await fetch(file.download_url || file.url, { signal: AbortSignal.timeout(10000) });
+          if (!res.ok) continue;
           const content = await res.text();
+          if (!isSafeRelativePath(file.name)) continue;
           const filePath = path.join(targetDir, file.name);
+          fs.mkdirSync(path.dirname(filePath), { recursive: true });
           fs.writeFileSync(filePath, content);
         } catch {}
       }
@@ -222,10 +255,13 @@ const SKILL = {
   },
 
   async installFromGitHubDir(slug, meta) {
-    const targetDir = path.join(SKILLS_DIR, slug);
+    const safeSlug = normalizeSkillId(slug);
+    if (!safeSlug) return { error: `Invalid skill slug '${slug}'` };
+    const targetDir = resolveSkillDir(safeSlug);
+    if (!targetDir) return { error: 'Unsafe target path' };
 
     if (fs.existsSync(targetDir)) {
-      return { error: `Skill '${slug}' already installed` };
+      return { error: `Skill '${safeSlug}' already installed` };
     }
 
     return new Promise((resolve) => {
@@ -235,7 +271,7 @@ const SKILL = {
           return;
         }
 
-        const srcDir = path.join('/tmp/openclaw-skills-cache', 'skills', slug);
+        const srcDir = path.join('/tmp/openclaw-skills-cache', 'skills', safeSlug);
         if (!fs.existsSync(srcDir)) {
           resolve({ error: `Skill path not found in repo` });
           return;
@@ -248,12 +284,12 @@ const SKILL = {
             return;
           }
 
-          this.registerSkill(slug, meta);
-          const reloaded = await this.hotReload(slug);
+          this.registerSkill(safeSlug, meta);
+          const reloaded = await this.hotReload(safeSlug);
           resolve({
             success: true,
-            installed: slug,
-            name: meta.name || slug,
+            installed: safeSlug,
+            name: meta.name || safeSlug,
             source: 'GitHub/OpenClaw',
             active: reloaded,
             message: reloaded
@@ -266,22 +302,25 @@ const SKILL = {
   },
 
   remove(slug) {
-    const targetDir = path.join(SKILLS_DIR, slug);
+    const safeSlug = normalizeSkillId(slug);
+    if (!safeSlug) return { error: `Invalid skill '${slug}'` };
+    const targetDir = resolveSkillDir(safeSlug);
+    if (!targetDir) return { error: 'Unsafe target path' };
 
     if (!fs.existsSync(targetDir)) {
-      return { error: `Skill '${slug}' not installed` };
+      return { error: `Skill '${safeSlug}' not installed` };
     }
 
     // Don't remove core skills
     const protectedSkills = ['skills', 'coding', 'automation', 'tailwind', 'uiux', 'vibe', 'translator'];
-    if (protectedSkills.includes(slug)) {
-      return { error: `'${slug}' is a core skill. Cannot remove.` };
+    if (protectedSkills.includes(safeSlug)) {
+      return { error: `'${safeSlug}' is a core skill. Cannot remove.` };
     }
 
     fs.rmSync(targetDir, { recursive: true });
-    this.unregisterSkill(slug);
+    this.unregisterSkill(safeSlug);
 
-    return { success: true, removed: slug };
+    return { success: true, removed: safeSlug };
   },
 
   list() {
@@ -352,17 +391,21 @@ const SKILL = {
   },
 
   async info(slug) {
-    const metaPath = path.join(SKILLS_DIR, slug, 'skill.json');
-    if (!fs.existsSync(metaPath)) return { error: `Skill '${slug}' not found` };
+    const safeSlug = normalizeSkillId(slug);
+    if (!safeSlug) return { error: `Invalid skill '${slug}'` };
+    const targetDir = resolveSkillDir(safeSlug);
+    if (!targetDir) return { error: 'Unsafe target path' };
+    const metaPath = path.join(targetDir, 'skill.json');
+    if (!fs.existsSync(metaPath)) return { error: `Skill '${safeSlug}' not found` };
 
     const meta = JSON.parse(fs.readFileSync(metaPath));
-    const hasCode = fs.existsSync(path.join(SKILLS_DIR, slug, 'index.js'));
+    const hasCode = fs.existsSync(path.join(targetDir, 'index.js'));
 
     return {
       ...meta,
       installed: true,
       hasCode,
-      path: path.join(SKILLS_DIR, slug),
+      path: targetDir,
     };
   },
 };
