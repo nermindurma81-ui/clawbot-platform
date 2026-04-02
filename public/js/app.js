@@ -741,11 +741,11 @@ async function loadConfig() {
 function showInstallModal() { document.getElementById('install-modal').classList.remove('hidden'); }
 function hideInstallModal() { document.getElementById('install-modal').classList.add('hidden'); }
 
-function showInstallTab(tab) {
+function showInstallTab(tab, btnEl = null) {
   document.querySelectorAll('.install-tab-content').forEach(el => el.classList.add('hidden'));
   document.querySelectorAll('.install-tabs .tab').forEach(el => el.classList.remove('active'));
   document.getElementById(`install-${tab}`).classList.remove('hidden');
-  event.target.classList.add('active');
+  if (btnEl) btnEl.classList.add('active');
 }
 
 async function installSkillMd() {
@@ -796,9 +796,19 @@ async function installSkillFromUrl() {
   }
 }
 
-function removeSkill(id) {
+async function removeSkill(id) {
   if (!confirm(`Remove '${id}'?`)) return;
-  fetch(`${API}/skills/${id}`, { method: 'DELETE' }).then(() => refreshSkills());
+  try {
+    const res = await fetch(`${API}/skills/${id}`, {
+      method: 'DELETE',
+      headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || `Failed (${res.status})`);
+    refreshSkills();
+  } catch (err) {
+    alert(`❌ ${err.message}`);
+  }
 }
 
 async function uploadSoul() {
@@ -1046,7 +1056,7 @@ async function loadMarketplaceUI() {
 }
 
 // ===== Helpers =====
-function formatSize(bytes) {
+function formatBytes(bytes) {
   if (!bytes) return 'Unknown';
   const gb = bytes / (1024 ** 3);
   return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(bytes / (1024 ** 2)).toFixed(0)} MB`;
@@ -1062,7 +1072,7 @@ document.getElementById('zip-upload')?.addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
   const status = document.getElementById('zip-status');
-  status.textContent = '⏳ Uploading & installing...';
+  if (status) status.textContent = '⏳ Uploading & installing...';
   const formData = new FormData();
   formData.append('zipfile', file);
   try {
@@ -1073,10 +1083,12 @@ document.getElementById('zip-upload')?.addEventListener('change', async (e) => {
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    status.innerHTML = `✅ ${data.message}<br>Skills: ${data.skills?.join(', ') || 'none'}`;
+    if (status) status.innerHTML = `✅ ${data.message}<br>Skills: ${data.skills?.join(', ') || 'none'}`;
     refreshSkills();
     loadSettings();
   } catch (err) {
-    status.textContent = `❌ ${err.message}`;
+    if (status) status.textContent = `❌ ${err.message}`;
+  } finally {
+    e.target.value = '';
   }
 });
