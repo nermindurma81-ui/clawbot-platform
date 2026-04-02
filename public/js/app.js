@@ -116,7 +116,10 @@ async function checkAuth() {
       currentUser = data.user;
       enterApp();
     }
-  } catch { /* stay on auth screen */ }
+  } catch {
+    document.getElementById('auth-screen')?.classList.add('active');
+    document.getElementById('app')?.classList.remove('active');
+  }
 }
 
 function skipAuth() {
@@ -151,6 +154,7 @@ function enterApp() {
 
 function showAuthError(msg) {
   const el = document.getElementById('auth-error');
+  if (!el) return;
   if (!msg) {
     el.textContent = '';
     el.classList.add('hidden');
