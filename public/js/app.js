@@ -186,12 +186,32 @@ function toggleSidebar() {
 }
 
 // ===== Streaming Chat =====
+const PROVIDER_BADGES = {
+  groq:        '⚡ GROQ',
+  cerebras:    '⚡ CEREBRAS',
+  llm7:        '🆓 LLM7',
+  mistral:     '🌬️ MISTRAL',
+  siliconflow: '🔷 SILICON',
+  gemini:      '✨ GEMINI',
+  huggingface: '🤗 HF',
+  ollama:      '🦙 LOCAL',
+};
+
 async function sendMessage() {
   const input = document.getElementById('chat-input');
   const message = input.value.trim();
   if (!message || isStreaming) return;
 
-  const model = document.getElementById('model-select').value;
+  const modelSelect = document.getElementById('model-select');
+  const model = modelSelect.value;
+  const selectedOpt = modelSelect.selectedOptions[0];
+
+  // Detektuj provider: iz data-provider atributa ili iz MODEL_PROVIDERS mape
+  const provider = selectedOpt?.dataset?.provider || MODEL_PROVIDERS[model] || 'llm7';
+
+  // Spremi zadnji model
+  localStorage.setItem('clawbot_model', model);
+
   input.value = '';
   input.style.height = 'auto';
 
@@ -199,13 +219,13 @@ async function sendMessage() {
   isStreaming = true;
   document.getElementById('send-btn').disabled = true;
 
-  // Show typing indicator
-  const typingId = addTypingIndicator();
+  // Pokaži koji provider se koristi
+  const typingId = addTypingIndicator(provider);
 
   const botMsgId = addMessage('bot', '');
   const botContent = document.querySelector(`#${botMsgId} .msg-content`);
 
-  // Build chat history for context
+  // Napravi history za context
   const chatHistory = [];
   document.querySelectorAll('.message').forEach(msg => {
     const role = msg.classList.contains('user') ? 'user' : 'assistant';
@@ -220,15 +240,19 @@ async function sendMessage() {
         'Content-Type': 'application/json',
         ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
       },
-      body: JSON.stringify({ message, model, history: chatHistory.slice(-10) }),
+      body: JSON.stringify({
+        message,
+        model,
+        provider,  // ← ovo je ključno!
+        history: chatHistory.slice(-10),
+      }),
     });
 
-    // Remove typing indicator once response starts
     removeTypingIndicator(typingId);
 
     if (!res.ok) {
       const errData = await res.json();
-      botContent.innerHTML = `<span class="error-text">❌ ${errData.error || 'Something went wrong'}</span>`;
+      botContent.innerHTML = `<span class="error-text">❌ ${errData.error || 'Greška'}</span>`;
       isStreaming = false;
       document.getElementById('send-btn').disabled = false;
       return;
@@ -244,7 +268,8 @@ async function sendMessage() {
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
+      const lines = buffer.split('
+');
       buffer = lines.pop() || '';
 
       for (const line of lines) {
@@ -260,26 +285,33 @@ async function sendMessage() {
             if (data.done && data.skill) {
               botContent.innerHTML += `<div class="skill-badge">⚡ ${data.skill}</div>`;
             }
+            if (data.done && data.model) {
+              // Pokaži koji model je odgovorio
+              const modelBadge = document.querySelector(`#${botMsgId} .model-badge`);
+              if (!modelBadge) {
+                const badge = document.createElement('div');
+                badge.className = 'model-badge';
+                badge.textContent = `${PROVIDER_BADGES[provider] || provider} ${data.model}`;
+                document.querySelector(`#${botMsgId} .msg-content-wrap`)?.appendChild(badge);
+              }
+            }
           } catch {}
         }
       }
 
-      // Auto-scroll
       const container = document.getElementById('chat-messages');
       container.scrollTop = container.scrollHeight;
     }
 
-    // Apply syntax highlighting
     botContent.querySelectorAll('pre code').forEach(block => {
-      hljs.highlightElement(block);
+      if (typeof hljs !== 'undefined') hljs.highlightElement(block);
     });
 
-    // Save to history
     saveChatMessage('user', message);
     saveChatMessage('bot', fullResponse, model);
 
   } catch (err) {
-    botContent.innerHTML = `<span class="error-text">❌ Connection error: ${err.message}</span>`;
+    botContent.innerHTML = `<span class="error-text">❌ ${err.message}</span>`;
   }
 
   isStreaming = false;
@@ -311,20 +343,20 @@ function addMessage(role, content) {
   return id;
 }
 
-function addTypingIndicator() {
+function addTypingIndicator(provider = '') {
   const container = document.getElementById('chat-messages');
   const id = 'typing-' + Date.now();
   const div = document.createElement('div');
   div.className = 'message bot';
   div.id = id;
+  const badge = PROVIDER_BADGES[provider] || provider;
   div.innerHTML = `
     <div class="msg-avatar">🐾</div>
     <div class="msg-content">
       <div class="typing-indicator">
-        <span class="dot"></span>
-        <span class="dot"></span>
-        <span class="dot"></span>
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
       </div>
+      ${provider ? `<div class="provider-typing">${badge}</div>` : ''}
     </div>
   `;
   container.appendChild(div);
@@ -617,16 +649,80 @@ async function loadAnalytics() {
 // ===== Models =====
 async function refreshModels() {
   try {
-    const res = await fetch(`${API}/models`);
-    const data = await res.json();
-
-    if (!data.models?.length) return;
+    // Dohvati sve free providere
+    const [provRes, ollamaRes] = await Promise.allSettled([
+      fetch(`${API}/models/providers`),
+      fetch(`${API}/ollama/api/tags`),
+    ]);
 
     const select = document.getElementById('model-select');
-    select.innerHTML = data.models.map(m =>
-      `<option value="${m.name}">${m.name}</option>`
-    ).join('');
-  } catch {}
+    select.innerHTML = '';
+
+    // Ollama lokalni modeli (Railway)
+    if (ollamaRes.status === 'fulfilled' && ollamaRes.value.ok) {
+      const ollamaData = await ollamaRes.value.json();
+      const ollamaModels = ollamaData.models || [];
+      if (ollamaModels.length > 0) {
+        const grp = document.createElement('optgroup');
+        grp.label = '🦙 Ollama (Railway — lokalni)';
+        ollamaModels.forEach(m => {
+          MODEL_PROVIDERS[m.name] = 'ollama';
+          const opt = document.createElement('option');
+          opt.value = m.name;
+          opt.dataset.provider = 'ollama';
+          const sizeGB = m.size ? (m.size / 1e9).toFixed(1) + 'GB' : '';
+          opt.textContent = `${m.name} ${sizeGB}`;
+          grp.appendChild(opt);
+        });
+        select.appendChild(grp);
+      }
+    }
+
+    // Svi cloud provideri
+    if (provRes.status === 'fulfilled' && provRes.value.ok) {
+      const provData = await provRes.value.json();
+      (provData.providers || []).forEach(provider => {
+        if (provider.id === 'ollama') return; // već dodano gore
+        if (!provider.models?.length) return;
+
+        const grp = document.createElement('optgroup');
+        const statusIcon = provider.configured ? '✅' : '🔑';
+        grp.label = `${provider.name} ${statusIcon} — ${provider.description}`;
+
+        provider.models.forEach(m => {
+          MODEL_PROVIDERS[m.id] = provider.id;
+          const opt = document.createElement('option');
+          opt.value = m.id;
+          opt.dataset.provider = provider.id;
+          opt.textContent = `${m.speed || ''} ${m.name} (${m.size || 'cloud'})`;
+          if (!provider.configured && provider.id !== 'llm7') opt.disabled = true;
+          grp.appendChild(opt);
+        });
+
+        select.appendChild(grp);
+      });
+    }
+
+    // Ako je dropdown prazan, stavi fallback
+    if (select.options.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = 'deepseek-chat';
+      opt.dataset.provider = 'llm7';
+      opt.textContent = '🆓 DeepSeek Chat (LLM7 — bez ključa)';
+      select.appendChild(opt);
+    }
+
+    // Označi trenutno odabrani model iz settingsa
+    const saved = localStorage.getItem('clawbot_model');
+    if (saved) {
+      for (const opt of select.options) {
+        if (opt.value === saved) { opt.selected = true; break; }
+      }
+    }
+
+  } catch (err) {
+    console.error('refreshModels failed:', err);
+  }
 }
 
 // ===== Status =====
@@ -843,6 +939,7 @@ let isSwiping = false;
 
 const PANELS = ['chat', 'history', 'skills', 'settings'];
 let currentPanelIndex = 0;
+let MODEL_PROVIDERS = {};
 
 function initSwipe() {
   const main = document.querySelector('.main-content');
