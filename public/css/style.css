@@ -765,6 +765,7 @@ html, body {
 
 /* ===== Mobile Responsive ===== */
 /* Touch device detection via JS class */
+.mobile-device #app.screen.active { flex-direction: column; height: 100dvh; overflow: hidden; }
 .mobile-device .sidebar {
   position: fixed;
   top: 0;
@@ -1076,7 +1077,30 @@ html, body {
   display: none;
 }
 
-@media (min-width: 769px) {
+.mobile-device .mobile-header {
+  display: flex !important;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+
+.mobile-device .mobile-header .hamburger {
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 24px;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.mobile-device .mobile-header .title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+@media (min-width: 1025px) {
   .mobile-header {
     display: none !important;
   }
