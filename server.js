@@ -29,6 +29,7 @@ const CONFIG = {
   cerebrasKey:  process.env.CEREBRAS_API_KEY     || '',
   mistralKey:   process.env.MISTRAL_API_KEY      || '',
   siliconKey:   process.env.SILICONFLOW_API_KEY  || '',
+  llm7BaseUrl: process.env.LLM7_BASE_URL || 'https://api.llm7.io/v1',
   defaultProvider: process.env.AI_PROVIDER || (
     process.env.GROQ_API_KEY        ? 'groq'        :
     process.env.CEREBRAS_API_KEY    ? 'cerebras'    :
@@ -686,7 +687,6 @@ const CEREBRAS_MODELS = {
   'llama-3.3-70b':  { name: 'Llama 3.3 70B',  speed: '⚡⚡⚡', size: '70B'  },
   'llama3.1-8b':    { name: 'Llama 3.1 8B',   speed: '⚡⚡⚡', size: '8B'   },
   'qwen-3-32b':     { name: 'Qwen 3 32B',     speed: '⚡⚡',  size: '32B'  },
-  'qwen-3-235b':    { name: 'Qwen 3 235B',    speed: '⚡',    size: '235B' },
 };
 
 // ── LLM7 (BEZ API KLJUČA — radi odmah!) ───────────────────────
@@ -714,6 +714,20 @@ const SILICON_MODELS = {
   'THUDM/glm-4-9b-chat':             { name: 'GLM 4 9B',            speed: '⚡⚡⚡', size: '9B'  },
   'internlm/internlm2_5-7b-chat':    { name: 'InternLM 2.5 7B',     speed: '⚡⚡⚡', size: '7B'  },
 };
+
+function resolveProviderModel(provider, requestedModel) {
+  const requested = String(requestedModel || '').trim();
+  const inList = (map) => requested && Object.prototype.hasOwnProperty.call(map, requested);
+
+  if (provider === 'groq')       return inList(GROQ_MODELS) ? requested : 'llama-3.1-8b-instant';
+  if (provider === 'cerebras')   return inList(CEREBRAS_MODELS) ? requested : 'llama-3.3-70b';
+  if (provider === 'llm7')       return inList(LLM7_MODELS) ? requested : 'deepseek-chat';
+  if (provider === 'mistral')    return inList(MISTRAL_MODELS) ? requested : 'mistral-small-latest';
+  if (provider === 'siliconflow')return inList(SILICON_MODELS) ? requested : 'Qwen/Qwen3-8B';
+  if (provider === 'huggingface')return requested || HF_DEFAULT_MODEL;
+  if (provider === 'gemini')     return requested || 'gemini-1.5-flash';
+  return requested || 'llama-3.1-8b-instant';
+}
 
 // ── Generička OpenAI-compatible chat funkcija ─────────────────
 async function chatOpenAICompat({ baseUrl, apiKey, model, message, system, maxTokens = 1024 }) {
@@ -811,7 +825,7 @@ async function chatCerebras(message, model, system) {
 
 async function chatLLM7(message, model, system) {
   const text = await chatOpenAICompat({
-    baseUrl: 'https://llm7.io/v1',
+    baseUrl: CONFIG.llm7BaseUrl,
     apiKey: null,  // BEZ API KLJUČA
     model: model || 'deepseek-chat',
     message, system,
@@ -957,19 +971,19 @@ app.post('/chat', async (req, res) => {
     const chatModel = skillResult?.model || model;
 
     if (provider === 'groq' && CONFIG.groqKey) {
-      result = await chatGroq(chatMessage, chatModel, enhancedSystem);
+      result = await chatGroq(chatMessage, resolveProviderModel('groq', chatModel), enhancedSystem);
     } else if (provider === 'cerebras' && CONFIG.cerebrasKey) {
-      result = await chatCerebras(chatMessage, chatModel, enhancedSystem);
+      result = await chatCerebras(chatMessage, resolveProviderModel('cerebras', chatModel), enhancedSystem);
     } else if (provider === 'gemini' && CONFIG.geminiKey) {
-      result = await chatGemini(chatMessage, chatModel, enhancedSystem);
+      result = await chatGemini(chatMessage, resolveProviderModel('gemini', chatModel), enhancedSystem);
     } else if (provider === 'mistral' && CONFIG.mistralKey) {
-      result = await chatMistralAI(chatMessage, chatModel, enhancedSystem);
+      result = await chatMistralAI(chatMessage, resolveProviderModel('mistral', chatModel), enhancedSystem);
     } else if (provider === 'siliconflow' && CONFIG.siliconKey) {
-      result = await chatSiliconFlow(chatMessage, chatModel, enhancedSystem);
+      result = await chatSiliconFlow(chatMessage, resolveProviderModel('siliconflow', chatModel), enhancedSystem);
     } else if (provider === 'huggingface' && CONFIG.hfKey) {
-      result = await chatHuggingFace(chatMessage, chatModel, enhancedSystem);
+      result = await chatHuggingFace(chatMessage, resolveProviderModel('huggingface', chatModel), enhancedSystem);
     } else if (provider === 'llm7') {
-      result = await chatLLM7(chatMessage, chatModel, enhancedSystem);
+      result = await chatLLM7(chatMessage, resolveProviderModel('llm7', chatModel), enhancedSystem);
     } else {
       // Fallback chain: Ollama → Groq → Cerebras → LLM7 (uvijek dostupan)
       try {
@@ -1061,7 +1075,7 @@ app.post('/chat/stream', async (req, res) => {
 
     // Stream from Groq
     if (provider === 'groq' && CONFIG.groqKey) {
-      const groqModel = chatModel && chatModel.startsWith('llama') ? chatModel : 'llama-3.1-8b-instant';
+      const groqModel = resolveProviderModel('groq', chatModel);
       const messages = [];
       if (enhancedSystem) messages.push({ role: 'system', content: enhancedSystem });
       
@@ -1116,15 +1130,20 @@ app.post('/chat/stream', async (req, res) => {
         }
       }
     } else if (provider === 'cerebras' && CONFIG.cerebrasKey) {
-      await streamOpenAICompat({ baseUrl: 'https://api.cerebras.ai/v1', apiKey: CONFIG.cerebrasKey, model: chatModel || 'llama-3.3-70b', provider: 'cerebras', message: chatMessage, system: enhancedSystem, res, history });
+      const modelToUse = resolveProviderModel('cerebras', chatModel);
+      await streamOpenAICompat({ baseUrl: 'https://api.cerebras.ai/v1', apiKey: CONFIG.cerebrasKey, model: modelToUse, provider: 'cerebras', message: chatMessage, system: enhancedSystem, res, history });
     } else if (provider === 'mistral' && CONFIG.mistralKey) {
-      await streamOpenAICompat({ baseUrl: 'https://api.mistral.ai/v1', apiKey: CONFIG.mistralKey, model: chatModel || 'mistral-small-latest', provider: 'mistral', message: chatMessage, system: enhancedSystem, res, history });
+      const modelToUse = resolveProviderModel('mistral', chatModel);
+      await streamOpenAICompat({ baseUrl: 'https://api.mistral.ai/v1', apiKey: CONFIG.mistralKey, model: modelToUse, provider: 'mistral', message: chatMessage, system: enhancedSystem, res, history });
     } else if (provider === 'siliconflow' && CONFIG.siliconKey) {
-      await streamOpenAICompat({ baseUrl: 'https://api.siliconflow.cn/v1', apiKey: CONFIG.siliconKey, model: chatModel || 'Qwen/Qwen3-8B', provider: 'siliconflow', message: chatMessage, system: enhancedSystem, res, history });
+      const modelToUse = resolveProviderModel('siliconflow', chatModel);
+      await streamOpenAICompat({ baseUrl: 'https://api.siliconflow.cn/v1', apiKey: CONFIG.siliconKey, model: modelToUse, provider: 'siliconflow', message: chatMessage, system: enhancedSystem, res, history });
     } else if (provider === 'huggingface' && CONFIG.hfKey) {
       await streamHuggingFace(chatMessage, chatModel, enhancedSystem, res, history);
     } else if (provider === 'llm7') {
-      await streamOpenAICompat({ baseUrl: 'https://llm7.io/v1', apiKey: null, model: chatModel || 'deepseek-chat', provider: 'llm7', message: chatMessage, system: enhancedSystem, res, history });
+      const modelToUse = resolveProviderModel('llm7', chatModel);
+      const result = await chatLLM7(chatMessage, modelToUse, enhancedSystem);
+      res.write(`data: ${JSON.stringify({ content: result.response, done: true, model: result.model, provider: 'llm7' })}\n\n`);
     } else {
       // Non-streaming fallback → uvijek završi na LLM7
       let result;
