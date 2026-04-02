@@ -1275,14 +1275,33 @@ app.post('/upload/zip', zipUpload.single('zipfile'), async (req, res) => {
     }
 
     for (const skillId of results.skills) {
-      try { loadSingleSkill(skillId); } catch (err) {
+      try {
+        // Clear require cache first
+        const skillPath = path.join(SKILLS_DIR, skillId, 'index.js');
+        if (require.cache[require.resolve(skillPath)]) {
+          delete require.cache[require.resolve(skillPath)];
+        }
+        loadSingleSkill(skillId);
+      } catch (err) {
         results.errors.push(`Failed to load '${skillId}': ${err.message}`);
       }
+    }
+
+    // Force reload all skills to pick up new ones
+    try {
+      Object.keys(loadedSkills).forEach(k => delete loadedSkills[k]);
+      Object.keys(require.cache).forEach(key => {
+        if (key.includes(SKILLS_DIR)) delete require.cache[key];
+      });
+      loadSkills();
+    } catch (err) {
+      results.errors.push(`Reload error: ${err.message}`);
     }
 
     res.json({
       success: true,
       message: `📦 Package installed! Skills: ${results.skills.length}, SOUL: ${results.soul ? '✅' : '❌'}, Memory: ${results.memory ? '✅' : '❌'}`,
+      loaded: Object.keys(loadedSkills),
       ...results,
     });
   } catch (err) {
