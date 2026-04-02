@@ -15,20 +15,22 @@ document.addEventListener('DOMContentLoaded', () => {
     applyTheme();
   } catch (e) { console.error('Init error:', e); }
   
-  // Auto-skip auth if no token - enter app directly
-  if (!authToken) {
-    setTimeout(() => enterApp(), 200);
-  } else {
-    // Delay auth check to not block page
-    setTimeout(() => {
-      try {
-        checkAuth();
-      } catch (e) { console.error('Auth error:', e); }
-    }, 100);
-  }
+  // Auto-skip auth and force show app
+  document.getElementById('auth-screen').classList.remove('active');
+  document.getElementById('app').classList.add('active');
   
-  try { refreshStatus(); } catch {}
-  try { refreshModels(); } catch {}
+  // Show chat panel by default
+  setTimeout(() => {
+    try {
+      showPanel('chat');
+      refreshStatus();
+      refreshModels();
+    } catch (e) { console.error('Init panels error:', e); }
+  }, 300);
+  
+  if (authToken) {
+    try { checkAuth(); } catch (e) { console.error('Auth error:', e); }
+  }
 });
 
 // Re-check on resize
