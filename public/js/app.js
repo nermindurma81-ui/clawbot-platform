@@ -48,6 +48,7 @@ function showAuthTab(tab) {
 
 async function handleLogin(e) {
   e.preventDefault();
+  e.stopPropagation();
   const email = document.getElementById('login-email').value;
   const password = document.getElementById('login-password').value;
   try {
@@ -65,10 +66,12 @@ async function handleLogin(e) {
   } catch (err) {
     showAuthError(err.message);
   }
+  return false;
 }
 
 async function handleSignup(e) {
   e.preventDefault();
+  e.stopPropagation();
   const email = document.getElementById('signup-email').value;
   const password = document.getElementById('signup-password').value;
   try {
@@ -86,10 +89,12 @@ async function handleSignup(e) {
   } catch (err) {
     showAuthError(err.message);
   }
+  return false;
 }
 
 async function checkAuth() {
   try {
+    if (!authToken) return;
     const res = await fetch(`${API}/auth/me`, {
       headers: { Authorization: `Bearer ${authToken}` },
     });
@@ -115,14 +120,16 @@ function logout() {
 }
 
 function enterApp() {
-  document.getElementById('auth-screen').classList.remove('active');
-  document.getElementById('app').classList.add('active');
-  document.getElementById('user-name').textContent =
-    currentUser?.email?.split('@')[0] || 'Guest';
-  refreshModels();
-  refreshStatus();
-  loadSettings();
-  loadChatHistory();
+  try {
+    document.getElementById('auth-screen').classList.remove('active');
+    document.getElementById('app').classList.add('active');
+    document.getElementById('user-name').textContent =
+      currentUser?.email?.split('@')[0] || 'Guest';
+  } catch {}
+  try { refreshModels(); } catch {}
+  try { refreshStatus(); } catch {}
+  try { loadSettings(); } catch {}
+  try { loadChatHistory(); } catch {}
 }
 
 function showAuthError(msg) {

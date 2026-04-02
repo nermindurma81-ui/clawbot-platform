@@ -187,10 +187,12 @@ app.post('/auth/login', async (req, res) => {
 });
 
 app.post('/auth/logout', async (req, res) => {
-  if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
   const token = req.headers.authorization?.replace('Bearer ', '');
-  if (token) {
-    await supabase.auth.admin.signOut(token);
+  if (token && token.startsWith('local-')) {
+    return res.json({ success: true });
+  }
+  if (supabase && token) {
+    try { await supabase.auth.admin.signOut(token); } catch {}
   }
   res.json({ success: true });
 });
