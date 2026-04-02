@@ -321,64 +321,34 @@ module.exports = SKILL;
 
   // Search skills on ClawHub
   async searchSkills(query) {
-    if (!query) return { response: '🔍 Napiši šta tražiš. Npr: "search skill za prevodjenje"' };
+    if (!query) return { response: '🔍 Napiši šta tražiš. Npr: "nađi skill za prevodjenje"' };
 
     try {
-      // Search ClawHub API
       const res = await fetch(`https://clawhub.com/api/skills?q=${encodeURIComponent(query)}&limit=5`, {
         signal: AbortSignal.timeout(10000),
       });
       const data = await res.json();
 
       if (data.skills && data.skills.length > 0) {
-        let response = `🔍 **Pronađeno ${data.skills.length} skill-ova za "${query}":**\n\n`;
-        const results = [];
-
-        data.skills.forEach((skill, i) => {
-          response += `**${i + 1}. ${skill.icon || '🔧'} ${skill.name}**\n`;
-          response += `   ${skill.description || 'Bez opisa'}\n`;
-          response += `   Triggeri: ${(skill.triggers || []).join(', ') || 'none'}\n`;
-          response += `   ⬇️ Instaliraj: \`install skill ${skill.slug || skill.name}\`\n\n`;
-          results.push({
-            name: skill.name,
-            slug: skill.slug || skill.name,
-            description: skill.description,
-            icon: skill.icon,
-            triggers: skill.triggers,
-          });
-        });
-
-        response += `_Napiši "install skill NAZIV" da instaliraš._`;
-
-        return { response, results, source: 'clawhub' };
-      }
-    } catch (err) {
-      // ClawHub failed, try GitHub
-    }
-
-    // Fallback: search GitHub for clawbot skills
-    try {
-      const ghRes = await fetch(`https://api.github.com/search/repositories?q=${encodeURIComponent(query)}+clawbot+skill&sort=stars&limit=5`, {
-        signal: AbortSignal.timeout(10000),
-        headers: { 'Accept': 'application/vnd.github.v3+json' },
-      });
-      const ghData = await ghRes.json();
-
-      if (ghData.items && ghData.items.length > 0) {
-        let response = `🔍 **GitHub rezultati za "${query}":**\n\n`;
-
-        ghData.items.slice(0, 5).forEach((repo, i) => {
-          response += `**${i + 1}. 📦 ${repo.full_name}**\n`;
-          response += `   ${repo.description || 'Bez opisa'}\n`;
-          response += `   ⭐ ${repo.stargazers_count} | 🔗 ${repo.html_url}\n\n`;
-        });
-
-        response += `_Pošalji URL skill.md fajla da instaliram._`;
-        return { response, source: 'github' };
+        // AUTO-INSTALL first result
+        const best = data.skills[0];
+        if (best.content || best.skill_md) {
+          const result = await this.installSkillMd(best.content || best.skill_md, 'skill.md');
+          if (result.success) {
+            let response = `✅ Instalirao **${result.name}**!\n🎯 Triggeri: ${(result.triggers || []).join(', ') || 'none'}\n\n`;
+            if (data.skills.length > 1) {
+              response += `_Još ${data.skills.length - 1} rezultata:_\n`;
+              data.skills.slice(1).forEach((s, i) => {
+                response += `${i + 2}. ${s.icon || '🔧'} ${s.name} — _instaliraj skill ${s.slug || s.name}_\n`;
+              });
+            }
+            return { response, success: true, installed: result.installed };
+          }
+        }
       }
     } catch {}
 
-    return { response: `🔍 Nisam našao skill za "${query}". Probaj drugačiji opis ili instaliraj sa URL-a.` };
+    return { response: `🔍 Nisam našao skill za "${slug}". Pošalji URL skill.md da instaliram.` };
   },
 
   // Install skill from ClawHub by slug/name
@@ -386,7 +356,7 @@ module.exports = SKILL;
     if (!slug) return { response: '❌ Napiši koji skill. Npr: "install skill translator"' };
 
     try {
-      // Try ClawHub API first
+      // Try ClawHub API first — exact match
       const res = await fetch(`https://clawhub.com/api/skills/${encodeURIComponent(slug)}`, {
         signal: AbortSignal.timeout(10000),
       });
@@ -399,18 +369,57 @@ module.exports = SKILL;
 
           if (result.success) {
             return {
-              response: `✅ **${result.name}** instaliran!\n\n🎯 Triggeri: ${(result.triggers || []).join(', ')}\n📝 Ima kod: ${result.hasCode ? 'Da' : 'Ne (prompt-based)'}\n\n_Skill je aktivan odmah!_`,
+              response: `✅ **${result.name}** instaliran i aktivan!\n\n🎯 Triggeri: ${(result.triggers || []).join(', ') || 'none'}\n\n_Piši nešto da testiraš._`,
               success: true,
               installed: result.installed,
             };
           }
-          return { response: `❌ Greška pri instalaciji: ${result.error}` };
+          return { response: `❌ Greška: ${result.error}` };
         }
       }
     } catch {}
 
-    // Fallback: search and return results
-    return this.searchSkills(slug);
+    // No exact match — search and auto-install first result
+    try {
+      const searchRes = await fetch(`https://clawhub.com/api/skills?q=${encodeURIComponent(slug)}&limit=1`, {
+        signal: AbortSignal.timeout(10000),
+      });
+      const searchData = await searchRes.json();
+
+      if (searchData.skills && searchData.skills.length > 0) {
+        const best = searchData.skills[0];
+        const content = best.content || best.skill_md;
+
+        if (content) {
+          const result = await this.installSkillMd(content, 'skill.md');
+          if (result.success) {
+            return {
+              response: `✅ Instalirao **${result.name}** (najbolji match za "${slug}")!\n\n🎯 Triggeri: ${(result.triggers || []).join(', ') || 'none'}\n\n_Skill aktivan!_`,
+              success: true,
+              installed: result.installed,
+            };
+          }
+        }
+
+        // No content in API — try to fetch from URL
+        if (best.url || best.download_url) {
+          try {
+            const fileRes = await fetch(best.url || best.download_url, { signal: AbortSignal.timeout(10000) });
+            const fileContent = await fileRes.text();
+            const result = await this.installSkillMd(fileContent, 'skill.md');
+            if (result.success) {
+              return {
+                response: `✅ Instalirao **${result.name}** sa ClawHub-a!\n🎯 Triggeri: ${(result.triggers || []).join(', ') || 'none'}`,
+                success: true,
+                installed: result.installed,
+              };
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+
+    return { response: `❌ Nisam našao skill "${slug}" na ClawHub-u. Probaj drugačiji naziv ili pošalji URL.` };
   },
 
   async hotReload(slug) {
