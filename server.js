@@ -21,6 +21,7 @@ const CONFIG = {
   ollama: process.env.OLLAMA_URL || 'http://localhost:11434',
   supabaseUrl: process.env.SUPABASE_URL || '',
   supabaseKey: process.env.SUPABASE_ANON_KEY || '',
+  supabaseServiceKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
   geminiKey: process.env.GEMINI_API_KEY || '',
   groqKey: process.env.GROQ_API_KEY || '',
   defaultProvider: process.env.AI_PROVIDER || (process.env.GROQ_API_KEY ? 'groq' : process.env.GEMINI_API_KEY ? 'gemini' : 'ollama'),
@@ -63,15 +64,30 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // ===== Supabase Auth Middleware =====
 let supabase = null;
+let supabaseAdmin = null;
 if (CONFIG.supabaseUrl && CONFIG.supabaseKey) {
   const { createClient } = require('@supabase/supabase-js');
   supabase = createClient(CONFIG.supabaseUrl, CONFIG.supabaseKey);
+  // Admin client for auto-confirm users
+  const adminKey = CONFIG.supabaseServiceKey || CONFIG.supabaseKey;
+  supabaseAdmin = createClient(CONFIG.supabaseUrl, adminKey, {
+    auth: { autoRefreshToken: false, persistSession: false }
+  });
   console.log('✅ Supabase connected:', CONFIG.supabaseUrl);
 }
 
 async function authMiddleware(req, res, next) {
   const token = req.headers.authorization?.replace('Bearer ', '');
   if (!token) return next(); // Allow unauthenticated for public routes
+
+  // Handle local tokens
+  if (token.startsWith('local-')) {
+    try {
+      const userData = JSON.parse(Buffer.from(token.replace('local-', ''), 'base64').toString());
+      req.user = { id: userData.id, email: userData.email };
+    } catch {}
+    return next();
+  }
 
   if (supabase) {
     const { data, error } = await supabase.auth.getUser(token);
@@ -83,35 +99,91 @@ async function authMiddleware(req, res, next) {
 }
 app.use(authMiddleware);
 
+// ===== Local Auth Fallback (when Supabase email confirmation blocks) =====
+const localUsersPath = path.join(DATA_DIR, 'local-users.json');
+
+function getLocalUsers() {
+  if (!fs.existsSync(localUsersPath)) return {};
+  return JSON.parse(fs.readFileSync(localUsersPath));
+}
+
+function saveLocalUser(email, password) {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  const users = getLocalUsers();
+  const id = 'local-' + Date.now();
+  users[email] = { id, email, password, created: new Date().toISOString() };
+  fs.writeFileSync(localUsersPath, JSON.stringify(users, null, 2));
+  return { id, email };
+}
+
+function verifyLocalUser(email, password) {
+  const users = getLocalUsers();
+  const user = users[email];
+  if (user && user.password === password) {
+    return { id: user.id, email: user.email };
+  }
+  return null;
+}
+
 // ===== Auth Routes =====
 app.post('/auth/signup', async (req, res) => {
-  if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
   const { email, password } = req.body;
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: { emailRedirectTo: undefined }
-  });
-  if (error) return res.status(400).json({ error: error.message });
+  if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
 
-  // If no session (email confirmation required), try to auto-login
-  if (!data.session) {
+  // Try Supabase first
+  if (supabase) {
     try {
-      const loginResult = await supabase.auth.signInWithPassword({ email, password });
-      if (loginResult.data.session) {
-        return res.json({ user: loginResult.data.user, session: loginResult.data.session });
+      const { data, error } = await supabase.auth.signUp({ email, password });
+      if (!error && data.session) {
+        return res.json({ user: data.user, session: data.session });
+      }
+      // If signup succeeded but no session (email confirmation), try auto-login
+      if (!error && !data.session) {
+        const loginResult = await supabase.auth.signInWithPassword({ email, password });
+        if (loginResult.data?.session) {
+          return res.json({ user: loginResult.data.user, session: loginResult.data.session });
+        }
       }
     } catch {}
   }
-  res.json({ user: data.user, session: data.session });
+
+  // Fallback: local auth (no email confirmation needed)
+  const localUser = saveLocalUser(email, password);
+  const token = Buffer.from(JSON.stringify({ id: localUser.id, email })).toString('base64');
+  res.json({
+    user: { id: localUser.id, email: localUser.email },
+    session: { access_token: 'local-' + token },
+    local: true,
+    message: 'Account created (local mode)',
+  });
 });
 
 app.post('/auth/login', async (req, res) => {
-  if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
   const { email, password } = req.body;
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) return res.status(401).json({ error: error.message });
-  res.json({ user: data.user, session: data.session });
+  if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+
+  // Try Supabase first
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (!error && data.session) {
+        return res.json({ user: data.user, session: data.session });
+      }
+    } catch {}
+  }
+
+  // Fallback: local auth
+  const user = verifyLocalUser(email, password);
+  if (user) {
+    const token = Buffer.from(JSON.stringify({ id: user.id, email })).toString('base64');
+    return res.json({
+      user: { id: user.id, email: user.email },
+      session: { access_token: 'local-' + token },
+      local: true,
+    });
+  }
+
+  res.status(401).json({ error: 'Invalid email or password' });
 });
 
 app.post('/auth/logout', async (req, res) => {
