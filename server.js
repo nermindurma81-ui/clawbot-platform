@@ -1282,6 +1282,19 @@ const zipUpload = multer({
   limits: { fileSize: 10 * 1024 * 1024 },
 });
 
+function isSafeRelativePath(inputPath) {
+  const normalized = String(inputPath || '').replace(/\\/g, '/');
+  if (!normalized || normalized.startsWith('/') || normalized.includes('\0')) return false;
+  const clean = path.posix.normalize(normalized);
+  return clean && clean !== '.' && !clean.startsWith('../');
+}
+
+function isValidSkillId(skillId) {
+  const id = String(skillId || '').trim();
+  if (!id || id === '.' || id === '..') return false;
+  return /^[a-zA-Z0-9._-]+$/.test(id);
+}
+
 app.post('/upload/zip', zipUpload.single('zipfile'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No ZIP file uploaded' });
 
@@ -1292,11 +1305,17 @@ app.post('/upload/zip', zipUpload.single('zipfile'), async (req, res) => {
 
     for (const entry of entries) {
       if (entry.isDirectory) continue;
-      const content = entry.getData().toString('utf8');
-      const parts = entry.entryName.split('/');
+      const entryName = String(entry.entryName || '').replace(/\\/g, '/');
+      if (!isSafeRelativePath(entryName)) {
+        results.errors.push(`Skipped unsafe entry path: ${entry.entryName}`);
+        continue;
+      }
+      const contentBuffer = entry.getData();
+      const content = contentBuffer.toString('utf8');
+      const parts = entryName.split('/').filter(Boolean);
       const filename = parts[parts.length - 1];
 
-      if (filename.toLowerCase() === 'soul.md' && !entry.entryName.includes('skills/')) {
+      if (filename.toLowerCase() === 'soul.md' && !entryName.includes('skills/')) {
         if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
         fs.writeFileSync(path.join(DATA_DIR, 'soul.md'), content);
         soulCache = content;
@@ -1304,7 +1323,7 @@ app.post('/upload/zip', zipUpload.single('zipfile'), async (req, res) => {
         continue;
       }
 
-      if (filename.toLowerCase() === 'memory.md' && !entry.entryName.includes('skills/')) {
+      if (filename.toLowerCase() === 'memory.md' && !entryName.includes('skills/')) {
         if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
         fs.writeFileSync(path.join(DATA_DIR, 'memory.md'), content);
         memoryCache = content;
@@ -1312,12 +1331,27 @@ app.post('/upload/zip', zipUpload.single('zipfile'), async (req, res) => {
         continue;
       }
 
-      if (entry.entryName.startsWith('skills/') && parts.length >= 3) {
+      if (entryName.startsWith('skills/') && parts.length >= 3) {
         const skillId = parts[1];
-        const targetDir = path.join(SKILLS_DIR, skillId);
+        if (!isValidSkillId(skillId)) {
+          results.errors.push(`Skipped invalid skill id: ${skillId}`);
+          continue;
+        }
+        const targetDir = path.resolve(SKILLS_DIR, skillId);
+        const skillsRoot = path.resolve(SKILLS_DIR) + path.sep;
+        if (!targetDir.startsWith(skillsRoot)) {
+          results.errors.push(`Skipped unsafe target path for skill: ${skillId}`);
+          continue;
+        }
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
         const fileRelativePath = parts.slice(2).join('/');
-        fs.writeFileSync(path.join(targetDir, fileRelativePath), content);
+        if (!isSafeRelativePath(fileRelativePath)) {
+          results.errors.push(`Skipped unsafe skill file path: ${entry.entryName}`);
+          continue;
+        }
+        const targetFile = path.join(targetDir, fileRelativePath);
+        fs.mkdirSync(path.dirname(targetFile), { recursive: true });
+        fs.writeFileSync(targetFile, contentBuffer);
         if (!results.skills.includes(skillId)) results.skills.push(skillId);
       }
     }
