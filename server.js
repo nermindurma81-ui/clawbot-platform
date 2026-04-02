@@ -23,9 +23,21 @@ const CONFIG = {
   supabaseUrl: process.env.SUPABASE_URL || '',
   supabaseKey: process.env.SUPABASE_ANON_KEY || '',
   supabaseServiceKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
-  geminiKey: process.env.GEMINI_API_KEY || '',
-  groqKey: process.env.GROQ_API_KEY || '',
-  defaultProvider: process.env.AI_PROVIDER || (process.env.GROQ_API_KEY ? 'groq' : process.env.GEMINI_API_KEY ? 'gemini' : 'ollama'),
+  geminiKey:    process.env.GEMINI_API_KEY       || '',
+  groqKey:      process.env.GROQ_API_KEY         || '',
+  hfKey:        process.env.HUGGINGFACE_TOKEN    || '',
+  cerebrasKey:  process.env.CEREBRAS_API_KEY     || '',
+  mistralKey:   process.env.MISTRAL_API_KEY      || '',
+  siliconKey:   process.env.SILICONFLOW_API_KEY  || '',
+  defaultProvider: process.env.AI_PROVIDER || (
+    process.env.GROQ_API_KEY        ? 'groq'        :
+    process.env.CEREBRAS_API_KEY    ? 'cerebras'    :
+    process.env.GEMINI_API_KEY      ? 'gemini'      :
+    process.env.MISTRAL_API_KEY     ? 'mistral'     :
+    process.env.SILICONFLOW_API_KEY ? 'siliconflow' :
+    process.env.HUGGINGFACE_TOKEN   ? 'huggingface' :
+    'llm7'
+  ),
   ownerEmail: process.env.OWNER_EMAIL || 'nermindurma81@gmail.com',
 };
 
@@ -511,6 +523,318 @@ async function chatOllama(message, model, system) {
   };
 }
 
+// ===== HuggingFace Chat Helper =====
+// Modeli dostupni besplatno na HF Inference API (bez storage-a na Railway)
+const HF_MODELS = {
+  // Llama
+  'meta-llama/Llama-3.2-3B-Instruct':      { name: 'Llama 3.2 3B',       size: '3B'  },
+  'meta-llama/Llama-3.1-8B-Instruct':      { name: 'Llama 3.1 8B',       size: '8B'  },
+  'meta-llama/Llama-3.1-70B-Instruct':     { name: 'Llama 3.1 70B',      size: '70B' },
+  // Mistral
+  'mistralai/Mistral-7B-Instruct-v0.3':    { name: 'Mistral 7B',         size: '7B'  },
+  'mistralai/Mixtral-8x7B-Instruct-v0.1':  { name: 'Mixtral 8x7B',       size: '47B' },
+  // Phi
+  'microsoft/Phi-3.5-mini-instruct':       { name: 'Phi 3.5 Mini',       size: '3.8B'},
+  'microsoft/Phi-3-medium-4k-instruct':    { name: 'Phi 3 Medium',       size: '14B' },
+  // Google
+  'google/gemma-2-9b-it':                  { name: 'Gemma 2 9B',         size: '9B'  },
+  'google/gemma-2-27b-it':                 { name: 'Gemma 2 27B',        size: '27B' },
+  // Qwen
+  'Qwen/Qwen2.5-7B-Instruct':             { name: 'Qwen 2.5 7B',        size: '7B'  },
+  'Qwen/Qwen2.5-72B-Instruct':            { name: 'Qwen 2.5 72B',       size: '72B' },
+  // Code
+  'Qwen/Qwen2.5-Coder-32B-Instruct':      { name: 'Qwen Coder 32B',     size: '32B' },
+  // Zephyr
+  'HuggingFaceH4/zephyr-7b-beta':          { name: 'Zephyr 7B',          size: '7B'  },
+};
+
+const HF_DEFAULT_MODEL = 'mistralai/Mistral-7B-Instruct-v0.3';
+
+async function chatHuggingFace(message, model, system) {
+  if (!CONFIG.hfKey) throw new Error('HUGGINGFACE_TOKEN nije postavljen u Railway Variables');
+
+  // Prihvatamo i kratka imena (npr. "Qwen2.5-7B") i puna HF ID-a
+  let hfModel = model;
+  if (!model || !model.includes('/')) {
+    hfModel = HF_DEFAULT_MODEL;
+  }
+
+  const messages = [];
+  if (system) messages.push({ role: 'system', content: system });
+  messages.push({ role: 'user', content: message });
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000);
+
+  const res = await fetch(
+    `https://api-inference.huggingface.co/models/${hfModel}/v1/chat/completions`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${CONFIG.hfKey}`,
+        'Content-Type':  'application/json',
+      },
+      body: JSON.stringify({
+        model: hfModel,
+        messages,
+        max_tokens: 1024,
+        temperature: 0.7,
+        stream: false,
+      }),
+      signal: controller.signal,
+    }
+  );
+  clearTimeout(timeout);
+
+  if (!res.ok) {
+    const errText = await res.text();
+    // Model se učitava — čest slučaj za rijetko korištene modele
+    if (res.status === 503) throw new Error(`HF model se učitava, pokušaj za 20s. (${hfModel})`);
+    throw new Error(`HuggingFace greška ${res.status}: ${errText.substring(0, 200)}`);
+  }
+
+  const data = await res.json();
+  const text = data.choices?.[0]?.message?.content || 'Nema odgovora';
+  return { response: text, model: hfModel, provider: 'huggingface' };
+}
+
+async function streamHuggingFace(message, model, system, res, history) {
+  if (!CONFIG.hfKey) throw new Error('HUGGINGFACE_TOKEN nije postavljen');
+
+  let hfModel = model;
+  if (!model || !model.includes('/')) hfModel = HF_DEFAULT_MODEL;
+
+  const messages = [];
+  if (system) messages.push({ role: 'system', content: system });
+  if (history && Array.isArray(history)) {
+    const recent = history.slice(-10);
+    for (const h of recent) {
+      if (h.role && h.content) messages.push({ role: h.role, content: h.content.substring(0, 500) });
+    }
+  }
+  messages.push({ role: 'user', content: message });
+
+  const hfRes = await fetch(
+    `https://api-inference.huggingface.co/models/${hfModel}/v1/chat/completions`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${CONFIG.hfKey}`,
+        'Content-Type':  'application/json',
+      },
+      body: JSON.stringify({
+        model: hfModel,
+        messages,
+        max_tokens: 2048,
+        temperature: 0.7,
+        stream: true,
+      }),
+    }
+  );
+
+  if (!hfRes.ok) {
+    const errText = await hfRes.text();
+    if (hfRes.status === 503) throw new Error(`HF model se učitava (${hfModel}), pokušaj za 20s`);
+    throw new Error(`HuggingFace greška ${hfRes.status}: ${errText.substring(0, 200)}`);
+  }
+
+  const reader = hfRes.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6).trim();
+      if (data === '[DONE]') {
+        res.write(`data: ${JSON.stringify({ done: true, model: hfModel })}\n\n`);
+        return;
+      }
+      try {
+        const parsed = JSON.parse(data);
+        const content = parsed.choices?.[0]?.delta?.content;
+        if (content) res.write(`data: ${JSON.stringify({ content })}\n\n`);
+      } catch {}
+    }
+  }
+}
+
+
+// ===== FREE PROVIDERS — Besplatni i Brzi 2026 =====
+
+// ── Groq model lista (700+ tok/sec, besplatno, 14.400/dan) ────
+const GROQ_MODELS = {
+  'llama-3.3-70b-versatile':   { name: 'Llama 3.3 70B',        speed: '⚡⚡⚡', size: '70B' },
+  'llama-3.1-8b-instant':      { name: 'Llama 3.1 8B Instant', speed: '⚡⚡⚡', size: '8B'  },
+  'llama-3.2-3b-preview':      { name: 'Llama 3.2 3B',         speed: '⚡⚡⚡', size: '3B'  },
+  'mixtral-8x7b-32768':        { name: 'Mixtral 8x7B',         speed: '⚡⚡',  size: '47B' },
+  'gemma2-9b-it':              { name: 'Gemma 2 9B',           speed: '⚡⚡⚡', size: '9B'  },
+  'deepseek-r1-distill-llama-70b': { name: 'DeepSeek R1 70B', speed: '⚡⚡',  size: '70B' },
+};
+
+// ── Cerebras (hardware LPU, brz kao Groq, besplatno) ─────────
+const CEREBRAS_MODELS = {
+  'llama-3.3-70b':  { name: 'Llama 3.3 70B',  speed: '⚡⚡⚡', size: '70B'  },
+  'llama3.1-8b':    { name: 'Llama 3.1 8B',   speed: '⚡⚡⚡', size: '8B'   },
+  'qwen-3-32b':     { name: 'Qwen 3 32B',     speed: '⚡⚡',  size: '32B'  },
+  'qwen-3-235b':    { name: 'Qwen 3 235B',    speed: '⚡',    size: '235B' },
+};
+
+// ── LLM7 (BEZ API KLJUČA — radi odmah!) ───────────────────────
+const LLM7_MODELS = {
+  'deepseek-r1':               { name: 'DeepSeek R1',           speed: '⚡⚡',  size: '671B' },
+  'deepseek-chat':             { name: 'DeepSeek V3',           speed: '⚡⚡⚡', size: '671B' },
+  'qwen/qwen2.5-72b-instruct': { name: 'Qwen 2.5 72B',         speed: '⚡⚡',  size: '72B'  },
+  'qwen/qwen2.5-coder-32b-instruct': { name: 'Qwen Coder 32B', speed: '⚡⚡',  size: '32B'  },
+  'microsoft/phi-4':           { name: 'Phi 4',                 speed: '⚡⚡⚡', size: '14B'  },
+  'mistralai/mistral-small-3.1-24b-instruct': { name: 'Mistral Small 3.1', speed: '⚡⚡', size: '24B' },
+};
+
+// ── Mistral AI (besplatno, 1B tok/mj) ────────────────────────
+const MISTRAL_MODELS = {
+  'mistral-small-latest':   { name: 'Mistral Small 3.1', speed: '⚡⚡⚡', size: '24B'  },
+  'mistral-large-latest':   { name: 'Mistral Large 3',   speed: '⚡⚡',  size: '123B' },
+  'open-mistral-nemo':      { name: 'Mistral Nemo',      speed: '⚡⚡⚡', size: '12B'  },
+  'codestral-latest':       { name: 'Codestral',         speed: '⚡⚡',  size: '22B'  },
+};
+
+// ── SiliconFlow (1000 RPM, 50K TPM — najveći besplatni limiti) ─
+const SILICON_MODELS = {
+  'Qwen/Qwen3-8B':                    { name: 'Qwen 3 8B',          speed: '⚡⚡⚡', size: '8B'  },
+  'deepseek-ai/DeepSeek-R1-Distill-Qwen-7B': { name: 'DeepSeek R1 7B', speed: '⚡⚡⚡', size: '7B' },
+  'THUDM/glm-4-9b-chat':             { name: 'GLM 4 9B',            speed: '⚡⚡⚡', size: '9B'  },
+  'internlm/internlm2_5-7b-chat':    { name: 'InternLM 2.5 7B',     speed: '⚡⚡⚡', size: '7B'  },
+};
+
+// ── Generička OpenAI-compatible chat funkcija ─────────────────
+async function chatOpenAICompat({ baseUrl, apiKey, model, message, system, maxTokens = 1024 }) {
+  const messages = [];
+  if (system) messages.push({ role: 'system', content: system });
+  messages.push({ role: 'user', content: message });
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000);
+
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ model, messages, max_tokens: maxTokens, stream: false }),
+    signal: controller.signal,
+  });
+  clearTimeout(timeout);
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`${baseUrl} greška ${res.status}: ${errText.substring(0, 150)}`);
+  }
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || 'Nema odgovora';
+}
+
+// ── Generička streaming funkcija za sve OpenAI-compat providere ─
+async function streamOpenAICompat({ baseUrl, apiKey, model, message, system, res: httpRes, history = [] }) {
+  const messages = [];
+  if (system) messages.push({ role: 'system', content: system });
+  if (history?.length) {
+    history.slice(-10).forEach(h => {
+      if (h.role && h.content) messages.push({ role: h.role, content: h.content.substring(0, 500) });
+    });
+  }
+  messages.push({ role: 'user', content: message });
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+  const apiRes = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ model, messages, max_tokens: 2048, stream: true }),
+  });
+
+  if (!apiRes.ok) {
+    const errText = await apiRes.text();
+    throw new Error(`${baseUrl} greška ${apiRes.status}: ${errText.substring(0, 150)}`);
+  }
+
+  const reader = apiRes.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6).trim();
+      if (data === '[DONE]') { httpRes.write(`data: ${JSON.stringify({ done: true, model })}
+
+`); return; }
+      try {
+        const parsed = JSON.parse(data);
+        const content = parsed.choices?.[0]?.delta?.content;
+        if (content) httpRes.write(`data: ${JSON.stringify({ content })}
+
+`);
+      } catch {}
+    }
+  }
+}
+
+// ── Provider dispatch funkcije ────────────────────────────────
+async function chatCerebras(message, model, system) {
+  const text = await chatOpenAICompat({
+    baseUrl: 'https://api.cerebras.ai/v1',
+    apiKey: CONFIG.cerebrasKey,
+    model: model || 'llama-3.3-70b',
+    message, system,
+  });
+  return { response: text, model: model || 'llama-3.3-70b', provider: 'cerebras' };
+}
+
+async function chatLLM7(message, model, system) {
+  const text = await chatOpenAICompat({
+    baseUrl: 'https://llm7.io/v1',
+    apiKey: null,  // BEZ API KLJUČA
+    model: model || 'deepseek-chat',
+    message, system,
+  });
+  return { response: text, model: model || 'deepseek-chat', provider: 'llm7' };
+}
+
+async function chatMistralAI(message, model, system) {
+  const text = await chatOpenAICompat({
+    baseUrl: 'https://api.mistral.ai/v1',
+    apiKey: CONFIG.mistralKey,
+    model: model || 'mistral-small-latest',
+    message, system,
+  });
+  return { response: text, model: model || 'mistral-small-latest', provider: 'mistral' };
+}
+
+async function chatSiliconFlow(message, model, system) {
+  const text = await chatOpenAICompat({
+    baseUrl: 'https://api.siliconflow.cn/v1',
+    apiKey: CONFIG.siliconKey,
+    model: model || 'Qwen/Qwen3-8B',
+    message, system,
+  });
+  return { response: text, model: model || 'Qwen/Qwen3-8B', provider: 'siliconflow' };
+}
+
 // ===== Skill Auto-Detection =====
 function detectSkill(message) {
   const lower = message.toLowerCase().trim();
@@ -630,20 +954,34 @@ app.post('/chat', async (req, res) => {
 
     if (provider === 'groq' && CONFIG.groqKey) {
       result = await chatGroq(chatMessage, chatModel, enhancedSystem);
+    } else if (provider === 'cerebras' && CONFIG.cerebrasKey) {
+      result = await chatCerebras(chatMessage, chatModel, enhancedSystem);
     } else if (provider === 'gemini' && CONFIG.geminiKey) {
       result = await chatGemini(chatMessage, chatModel, enhancedSystem);
+    } else if (provider === 'mistral' && CONFIG.mistralKey) {
+      result = await chatMistralAI(chatMessage, chatModel, enhancedSystem);
+    } else if (provider === 'siliconflow' && CONFIG.siliconKey) {
+      result = await chatSiliconFlow(chatMessage, chatModel, enhancedSystem);
+    } else if (provider === 'huggingface' && CONFIG.hfKey) {
+      result = await chatHuggingFace(chatMessage, chatModel, enhancedSystem);
+    } else if (provider === 'llm7') {
+      result = await chatLLM7(chatMessage, chatModel, enhancedSystem);
     } else {
-      // Try Ollama first, fall back to Groq then Gemini
+      // Fallback chain: Ollama → Groq → Cerebras → LLM7 (uvijek dostupan)
       try {
         result = await chatOllama(chatMessage, chatModel, enhancedSystem);
       } catch (ollamaErr) {
-        console.log('Ollama failed:', ollamaErr.message);
-        if (CONFIG.groqKey) {
-          result = await chatGroq(chatMessage, chatModel, enhancedSystem);
-        } else if (CONFIG.geminiKey) {
-          result = await chatGemini(chatMessage, chatModel, enhancedSystem);
-        } else {
-          throw ollamaErr;
+        console.log('Ollama failed, trying fallbacks...', ollamaErr.message);
+        try {
+          if (CONFIG.groqKey)      result = await chatGroq(chatMessage, chatModel, enhancedSystem);
+          else if (CONFIG.cerebrasKey) result = await chatCerebras(chatMessage, chatModel, enhancedSystem);
+          else if (CONFIG.geminiKey)   result = await chatGemini(chatMessage, chatModel, enhancedSystem);
+          else if (CONFIG.mistralKey)  result = await chatMistralAI(chatMessage, chatModel, enhancedSystem);
+          else if (CONFIG.hfKey)       result = await chatHuggingFace(chatMessage, chatModel, enhancedSystem);
+          else                         result = await chatLLM7(chatMessage, chatModel, enhancedSystem);
+        } catch (fallbackErr) {
+          // LLM7 je uvijek zadnji resort — bez ključa
+          result = await chatLLM7(chatMessage, null, enhancedSystem);
         }
       }
     }
@@ -773,17 +1111,33 @@ app.post('/chat/stream', async (req, res) => {
           }
         }
       }
+    } else if (provider === 'cerebras' && CONFIG.cerebrasKey) {
+      await streamOpenAICompat({ baseUrl: 'https://api.cerebras.ai/v1', apiKey: CONFIG.cerebrasKey, model: chatModel || 'llama-3.3-70b', message: chatMessage, system: enhancedSystem, res, history });
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    } else if (provider === 'mistral' && CONFIG.mistralKey) {
+      await streamOpenAICompat({ baseUrl: 'https://api.mistral.ai/v1', apiKey: CONFIG.mistralKey, model: chatModel || 'mistral-small-latest', message: chatMessage, system: enhancedSystem, res, history });
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    } else if (provider === 'siliconflow' && CONFIG.siliconKey) {
+      await streamOpenAICompat({ baseUrl: 'https://api.siliconflow.cn/v1', apiKey: CONFIG.siliconKey, model: chatModel || 'Qwen/Qwen3-8B', message: chatMessage, system: enhancedSystem, res, history });
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    } else if (provider === 'huggingface' && CONFIG.hfKey) {
+      await streamHuggingFace(chatMessage, chatModel, enhancedSystem, res, history);
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    } else if (provider === 'llm7') {
+      await streamOpenAICompat({ baseUrl: 'https://llm7.io/v1', apiKey: null, model: chatModel || 'deepseek-chat', message: chatMessage, system: enhancedSystem, res, history });
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
     } else {
-      // Non-streaming fallback
+      // Non-streaming fallback → uvijek završi na LLM7
       let result;
       try {
-        if (provider === 'gemini' && CONFIG.geminiKey) {
-          result = await chatGemini(chatMessage, chatModel, enhancedSystem);
-        } else {
-          result = await chatOllama(chatMessage, chatModel, enhancedSystem);
-        }
+        if (provider === 'gemini' && CONFIG.geminiKey) result = await chatGemini(chatMessage, chatModel, enhancedSystem);
+        else result = await chatOllama(chatMessage, chatModel, enhancedSystem);
       } catch {
-        if (CONFIG.groqKey) result = await chatGroq(chatMessage, chatModel, enhancedSystem);
+        try {
+          if (CONFIG.groqKey)    result = await chatGroq(chatMessage, chatModel, enhancedSystem);
+          else if (CONFIG.hfKey) result = await chatHuggingFace(chatMessage, chatModel, enhancedSystem);
+          else                   result = await chatLLM7(chatMessage, chatModel, enhancedSystem);
+        } catch { result = await chatLLM7(chatMessage, 'deepseek-chat', enhancedSystem); }
       }
       res.write(`data: ${JSON.stringify({ content: result.response, done: true, model: result.model })}\n\n`);
     }
@@ -793,6 +1147,98 @@ app.post('/chat/stream', async (req, res) => {
     res.write(`data: ${JSON.stringify({ error: err.message, done: true })}\n\n`);
     res.end();
   }
+});
+
+// ===== Providers + Models Endpoint =====
+// Vraća sve providere i modele za UI dropdown
+app.get('/models/providers', (req, res) => {
+  const providers = [
+    {
+      id: 'groq',
+      name: '⚡ Groq',
+      badge: 'GROQ',
+      description: '700+ tok/sec — najbrži API',
+      configured: !!CONFIG.groqKey,
+      key_url: 'https://console.groq.com',
+      models: Object.entries(GROQ_MODELS).map(([id, m]) => ({ id, ...m, provider: 'groq' })),
+    },
+    {
+      id: 'cerebras',
+      name: '⚡ Cerebras',
+      badge: 'CEREBRAS',
+      description: 'LPU inference — brz kao Groq',
+      configured: !!CONFIG.cerebrasKey,
+      key_url: 'https://cloud.cerebras.ai',
+      models: Object.entries(CEREBRAS_MODELS).map(([id, m]) => ({ id, ...m, provider: 'cerebras' })),
+    },
+    {
+      id: 'llm7',
+      name: '🆓 LLM7',
+      badge: 'FREE',
+      description: 'Bez API ključa — radi odmah',
+      configured: true,  // uvijek dostupan
+      key_url: null,
+      models: Object.entries(LLM7_MODELS).map(([id, m]) => ({ id, ...m, provider: 'llm7' })),
+    },
+    {
+      id: 'mistral',
+      name: '🌬️ Mistral AI',
+      badge: 'MISTRAL',
+      description: '1B tokena/mj besplatno',
+      configured: !!CONFIG.mistralKey,
+      key_url: 'https://console.mistral.ai',
+      models: Object.entries(MISTRAL_MODELS).map(([id, m]) => ({ id, ...m, provider: 'mistral' })),
+    },
+    {
+      id: 'siliconflow',
+      name: '🔷 SiliconFlow',
+      badge: 'SILICON',
+      description: '1000 RPM besplatno',
+      configured: !!CONFIG.siliconKey,
+      key_url: 'https://siliconflow.cn',
+      models: Object.entries(SILICON_MODELS).map(([id, m]) => ({ id, ...m, provider: 'siliconflow' })),
+    },
+    {
+      id: 'gemini',
+      name: '✨ Google Gemini',
+      badge: 'GEMINI',
+      description: '1M token context besplatno',
+      configured: !!CONFIG.geminiKey,
+      key_url: 'https://aistudio.google.com',
+      models: [
+        { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', speed: '⚡⚡⚡', size: 'cloud', provider: 'gemini' },
+        { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', speed: '⚡⚡⚡', size: 'cloud', provider: 'gemini' },
+        { id: 'gemini-1.5-pro',   name: 'Gemini 1.5 Pro',   speed: '⚡⚡',   size: 'cloud', provider: 'gemini' },
+      ],
+    },
+    {
+      id: 'huggingface',
+      name: '🤗 HuggingFace',
+      badge: 'HF',
+      description: '50GB storage, cloud inference',
+      configured: !!CONFIG.hfKey,
+      key_url: 'https://huggingface.co/settings/tokens',
+      models: Object.entries(HF_MODELS).map(([id, m]) => ({ id, ...m, provider: 'huggingface' })),
+    },
+    {
+      id: 'ollama',
+      name: '🦙 Ollama',
+      badge: 'LOCAL',
+      description: 'Lokalni modeli na Railway',
+      configured: true,
+      key_url: null,
+      models: [],  // dinamički sa /ollama/api/tags
+    },
+  ];
+  res.json({ providers });
+});
+
+// ===== HuggingFace Models List (backwards compat) =====
+app.get('/models/huggingface', (req, res) => {
+  const models = Object.entries(HF_MODELS).map(([id, info]) => ({
+    id, name: info.name, size: info.size, source: 'huggingface', available: !!CONFIG.hfKey,
+  }));
+  res.json({ models, configured: !!CONFIG.hfKey });
 });
 
 // ===== Analytics Endpoint =====
@@ -1448,6 +1894,8 @@ app.get('/config', (req, res) => {
     provider: CONFIG.defaultProvider,
     groq: !!CONFIG.groqKey,
     gemini: !!CONFIG.geminiKey,
+    huggingface: !!CONFIG.hfKey,
+    hf_models: CONFIG.hfKey ? Object.keys(HF_MODELS).length : 0,
   });
 });
 
@@ -1532,6 +1980,9 @@ server.listen(PORT, '0.0.0.0', () => {
 ║  Gateway:  ${CONFIG.gateway.padEnd(37)}║
 ║  Ollama:   ${CONFIG.ollama.padEnd(37)}║
 ║  Supabase: ${(supabase ? '✅ connected' : '❌ not set').padEnd(37)}║
+║  Groq:     ${(CONFIG.groqKey ? '✅ configured' : '❌ not set').padEnd(37)}║
+║  Gemini:   ${(CONFIG.geminiKey ? '✅ configured' : '❌ not set').padEnd(37)}║
+║  HuggFace: ${(CONFIG.hfKey ? '✅ ' + Object.keys(HF_MODELS).length + ' models available' : '❌ not set').padEnd(37)}║
 ║  Health:   http://localhost:${PORT}/status          ║
 ╚══════════════════════════════════════════════════╝
   `);
