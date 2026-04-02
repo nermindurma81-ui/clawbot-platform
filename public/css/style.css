@@ -781,8 +781,19 @@ html, body {
 .mobile-device .sidebar.open { left: 0; box-shadow: 4px 0 20px rgba(0,0,0,0.5); }
 .mobile-device .sidebar-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 199; }
 .mobile-device .sidebar-overlay.show { display: block; }
-.mobile-device .main-content { width: 100%; flex: 1; overflow: hidden; }
-.mobile-device .panel { height: 100%; width: 100%; }
+.mobile-device .main-content {
+  width: 100%;
+  flex: 1;
+  overflow: hidden;
+  padding-bottom: 70px;
+}
+
+.mobile-device .panel {
+  height: 100%;
+  width: 100%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
 .mobile-device .panel-header { padding: 10px 12px; flex-shrink: 0; }
 .mobile-device .panel-header h2 { font-size: 15px; }
 .mobile-device .chat-messages { padding: 10px; flex: 1; overflow-y: auto; }
@@ -803,7 +814,8 @@ html, body {
 .mobile-device .skill-card { padding: 10px; gap: 8px; }
 .mobile-device .skill-info h4 { font-size: 13px; }
 .mobile-device .skill-info p { font-size: 11px; }
-.mobile-device .settings-form { padding: 12px; }
+.mobile-device .settings-form { padding: 12px; padding-bottom: 80px; }
+.mobile-device .config-section { padding-bottom: 80px; }
 .mobile-device .setting-group input,
 .mobile-device .setting-group select,
 .mobile-device .setting-group textarea { font-size: 16px !important; padding: 10px !important; }
