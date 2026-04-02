@@ -15,21 +15,13 @@ document.addEventListener('DOMContentLoaded', () => {
     applyTheme();
   } catch (e) { console.error('Init error:', e); }
   
-  // Auto-skip auth and force show app
-  document.getElementById('auth-screen').classList.remove('active');
-  document.getElementById('app').classList.add('active');
-  
-  // Show chat panel by default
-  setTimeout(() => {
-    try {
-      showPanel('chat');
-      refreshStatus();
-      refreshModels();
-    } catch (e) { console.error('Init panels error:', e); }
-  }, 300);
-  
   if (authToken) {
     try { checkAuth(); } catch (e) { console.error('Auth error:', e); }
+  } else {
+    try {
+      document.getElementById('auth-screen').classList.add('active');
+      document.getElementById('app').classList.remove('active');
+    } catch (e) { console.error('Auth screen init error:', e); }
   }
 });
 
@@ -112,6 +104,13 @@ async function checkAuth() {
     const res = await fetch(`${API}/auth/me`, {
       headers: { Authorization: `Bearer ${authToken}` },
     });
+    if (!res.ok) {
+      localStorage.removeItem('clawbot_token');
+      authToken = null;
+      document.getElementById('auth-screen').classList.add('active');
+      document.getElementById('app').classList.remove('active');
+      return;
+    }
     const data = await res.json();
     if (data.user) {
       currentUser = data.user;
@@ -131,6 +130,9 @@ function logout() {
   localStorage.removeItem('clawbot_token');
   document.getElementById('auth-screen').classList.add('active');
   document.getElementById('app').classList.remove('active');
+  showAuthError('');
+  document.getElementById('login-form')?.reset();
+  document.getElementById('signup-form')?.reset();
 }
 
 function enterApp() {
@@ -142,12 +144,18 @@ function enterApp() {
   } catch {}
   try { refreshModels(); } catch {}
   try { refreshStatus(); } catch {}
+  try { showPanel('chat'); } catch {}
   try { loadSettings(); } catch {}
   try { loadChatHistory(); } catch {}
 }
 
 function showAuthError(msg) {
   const el = document.getElementById('auth-error');
+  if (!msg) {
+    el.textContent = '';
+    el.classList.add('hidden');
+    return;
+  }
   el.textContent = msg;
   el.classList.remove('hidden');
 }
@@ -275,8 +283,7 @@ async function sendMessage() {
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('
-');
+      const lines = buffer.split('\n');
       buffer = lines.pop() || '';
 
       for (const line of lines) {
