@@ -256,6 +256,15 @@ return { output: 'Hello!' }
               <textarea id="memory-input" rows="4" placeholder="User preferences, context..."></textarea>
               <button class="btn-sm" onclick="uploadMemory()">Add Memory</button>
             </div>
+            <div class="config-card" style="margin-top: 16px">
+              <h4>📦 Upload Package (ZIP)</h4>
+              <p style="font-size: 13px; color: var(--text-secondary)">Upload ZIP with skills/, SOUL.md, MEMORY.md</p>
+              <input type="file" id="zip-upload" accept=".zip" style="display:none">
+              <button onclick="document.getElementById('zip-upload').click()" class="btn-sm" style="width: 100%">
+                📦 Choose ZIP & Install
+              </button>
+              <div id="zip-status" style="margin-top: 8px; font-size: 13px"></div>
+            </div>
           </div>
         </div>
       </div>

@@ -762,3 +762,27 @@ function formatDate(dateStr) {
   if (!dateStr) return '—';
   return new Date(dateStr).toLocaleDateString();
 }
+
+// ZIP Upload
+document.getElementById('zip-upload')?.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const status = document.getElementById('zip-status');
+  status.textContent = '⏳ Uploading & installing...';
+  const formData = new FormData();
+  formData.append('zipfile', file);
+  try {
+    const res = await fetch(`${API}/upload/zip`, {
+      method: 'POST',
+      headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+      body: formData,
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    status.innerHTML = `✅ ${data.message}<br>Skills: ${data.skills?.join(', ') || 'none'}`;
+    refreshSkills();
+    loadSettings();
+  } catch (err) {
+    status.textContent = `❌ ${err.message}`;
+  }
+});

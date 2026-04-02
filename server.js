@@ -8,6 +8,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
+const multer = require('multer');
+const AdmZip = require('adm-zip');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -963,6 +965,68 @@ app.delete('/skills/:id', (req, res) => {
 });
 
 // ===== File Upload Endpoints =====
+
+// ZIP Upload (Full Package)
+const zipUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
+
+app.post('/upload/zip', zipUpload.single('zipfile'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No ZIP file uploaded' });
+
+  try {
+    const zip = new AdmZip(req.file.buffer);
+    const entries = zip.getEntries();
+    const results = { skills: [], soul: null, memory: null, errors: [] };
+
+    for (const entry of entries) {
+      if (entry.isDirectory) continue;
+      const content = entry.getData().toString('utf8');
+      const parts = entry.entryName.split('/');
+      const filename = parts[parts.length - 1];
+
+      if (filename.toLowerCase() === 'soul.md' && !entry.entryName.includes('skills/')) {
+        if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+        fs.writeFileSync(path.join(DATA_DIR, 'soul.md'), content);
+        soulCache = content;
+        results.soul = '✅ SOUL.md installed';
+        continue;
+      }
+
+      if (filename.toLowerCase() === 'memory.md' && !entry.entryName.includes('skills/')) {
+        if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+        fs.writeFileSync(path.join(DATA_DIR, 'memory.md'), content);
+        memoryCache = content;
+        results.memory = '✅ MEMORY.md installed';
+        continue;
+      }
+
+      if (entry.entryName.startsWith('skills/') && parts.length >= 3) {
+        const skillId = parts[1];
+        const targetDir = path.join(SKILLS_DIR, skillId);
+        if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+        const fileRelativePath = parts.slice(2).join('/');
+        fs.writeFileSync(path.join(targetDir, fileRelativePath), content);
+        if (!results.skills.includes(skillId)) results.skills.push(skillId);
+      }
+    }
+
+    for (const skillId of results.skills) {
+      try { loadSingleSkill(skillId); } catch (err) {
+        results.errors.push(`Failed to load '${skillId}': ${err.message}`);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `📦 Package installed! Skills: ${results.skills.length}, SOUL: ${results.soul ? '✅' : '❌'}, Memory: ${results.memory ? '✅' : '❌'}`,
+      ...results,
+    });
+  } catch (err) {
+    res.status(500).json({ error: `ZIP processing failed: ${err.message}` });
+  }
+});
 
 // Upload skill.md via raw text body
 app.post('/upload/skill', (req, res) => {
