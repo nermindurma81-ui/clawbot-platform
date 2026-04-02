@@ -115,6 +115,7 @@ app.use(authMiddleware);
 
 // ===== Local Auth Fallback (when Supabase email confirmation blocks) =====
 const localUsersPath = path.join(DATA_DIR, 'local-users.json');
+const runtimeConfigPath = path.join(DATA_DIR, 'runtime-config.json');
 
 function getLocalUsers() {
   if (!fs.existsSync(localUsersPath)) return {};
@@ -123,6 +124,44 @@ function getLocalUsers() {
   } catch {
     return {};
   }
+}
+
+function getRuntimeConfig() {
+  if (!fs.existsSync(runtimeConfigPath)) {
+    return { huggingface: { token: '', custom_models: [] } };
+  }
+  try {
+    const data = JSON.parse(fs.readFileSync(runtimeConfigPath, 'utf8'));
+    return {
+      huggingface: {
+        token: data?.huggingface?.token || '',
+        custom_models: Array.isArray(data?.huggingface?.custom_models) ? data.huggingface.custom_models : [],
+      },
+    };
+  } catch {
+    return { huggingface: { token: '', custom_models: [] } };
+  }
+}
+
+function saveRuntimeConfig(nextConfig) {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(runtimeConfigPath, JSON.stringify(nextConfig, null, 2));
+}
+
+function getHfToken() {
+  const runtime = getRuntimeConfig();
+  return runtime.huggingface.token || CONFIG.hfKey;
+}
+
+function getHfModelCatalog() {
+  const runtime = getRuntimeConfig();
+  const custom = {};
+  for (const raw of runtime.huggingface.custom_models || []) {
+    const id = String(raw || '').trim();
+    if (!id) continue;
+    custom[id] = { name: id, size: 'custom' };
+  }
+  return { ...HF_MODELS, ...custom };
 }
 
 function normalizeEmail(email) {
@@ -313,6 +352,44 @@ app.post('/settings', async (req, res) => {
   } else {
     res.json({ success: true, synced: false, message: 'Saved locally (login to sync)' });
   }
+});
+
+app.get('/settings/providers', (req, res) => {
+  const runtime = getRuntimeConfig();
+  const hfToken = getHfToken();
+  res.json({
+    huggingface: {
+      configured: !!hfToken,
+      has_runtime_token: !!runtime.huggingface.token,
+      custom_models: runtime.huggingface.custom_models || [],
+    },
+  });
+});
+
+app.post('/settings/providers/huggingface', (req, res) => {
+  const { token, custom_models } = req.body || {};
+  const runtime = getRuntimeConfig();
+
+  const normalizedModels = Array.isArray(custom_models)
+    ? custom_models.map(v => String(v || '').trim()).filter(Boolean)
+    : [];
+
+  runtime.huggingface = {
+    token: typeof token === 'string' ? token.trim() : (runtime.huggingface.token || ''),
+    custom_models: [...new Set(normalizedModels)],
+  };
+
+  saveRuntimeConfig(runtime);
+
+  res.json({
+    success: true,
+    message: 'HuggingFace settings saved',
+    huggingface: {
+      configured: !!getHfToken(),
+      has_runtime_token: !!runtime.huggingface.token,
+      custom_models: runtime.huggingface.custom_models,
+    },
+  });
 });
 
 // Sync SOUL to Supabase
@@ -552,11 +629,13 @@ const HF_MODELS = {
 const HF_DEFAULT_MODEL = 'mistralai/Mistral-7B-Instruct-v0.3';
 
 async function chatHuggingFace(message, model, system) {
-  if (!CONFIG.hfKey) throw new Error('HUGGINGFACE_TOKEN nije postavljen u Railway Variables');
+  const hfToken = getHfToken();
+  if (!hfToken) throw new Error('HUGGINGFACE_TOKEN nije postavljen u Railway Variables');
+  const hfCatalog = getHfModelCatalog();
 
   // Prihvatamo i kratka imena (npr. "Qwen2.5-7B") i puna HF ID-a
   let hfModel = model;
-  if (!model || !model.includes('/')) {
+  if (!model || (!model.includes('/') && !hfCatalog[model])) {
     hfModel = HF_DEFAULT_MODEL;
   }
 
@@ -572,7 +651,7 @@ async function chatHuggingFace(message, model, system) {
     {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${CONFIG.hfKey}`,
+        'Authorization': `Bearer ${hfToken}`,
         'Content-Type':  'application/json',
       },
       body: JSON.stringify({
@@ -600,10 +679,12 @@ async function chatHuggingFace(message, model, system) {
 }
 
 async function streamHuggingFace(message, model, system, res, history) {
-  if (!CONFIG.hfKey) throw new Error('HUGGINGFACE_TOKEN nije postavljen');
+  const hfToken = getHfToken();
+  if (!hfToken) throw new Error('HUGGINGFACE_TOKEN nije postavljen');
+  const hfCatalog = getHfModelCatalog();
 
   let hfModel = model;
-  if (!model || !model.includes('/')) hfModel = HF_DEFAULT_MODEL;
+  if (!model || (!model.includes('/') && !hfCatalog[model])) hfModel = HF_DEFAULT_MODEL;
 
   const messages = [];
   if (system) messages.push({ role: 'system', content: system });
@@ -620,7 +701,7 @@ async function streamHuggingFace(message, model, system, res, history) {
     {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${CONFIG.hfKey}`,
+        'Authorization': `Bearer ${hfToken}`,
         'Content-Type':  'application/json',
       },
       body: JSON.stringify({
@@ -980,7 +1061,7 @@ app.post('/chat', async (req, res) => {
       result = await chatMistralAI(chatMessage, resolveProviderModel('mistral', chatModel), enhancedSystem);
     } else if (provider === 'siliconflow' && CONFIG.siliconKey) {
       result = await chatSiliconFlow(chatMessage, resolveProviderModel('siliconflow', chatModel), enhancedSystem);
-    } else if (provider === 'huggingface' && CONFIG.hfKey) {
+    } else if (provider === 'huggingface' && getHfToken()) {
       result = await chatHuggingFace(chatMessage, resolveProviderModel('huggingface', chatModel), enhancedSystem);
     } else if (provider === 'llm7') {
       result = await chatLLM7(chatMessage, resolveProviderModel('llm7', chatModel), enhancedSystem);
@@ -995,7 +1076,7 @@ app.post('/chat', async (req, res) => {
           else if (CONFIG.cerebrasKey) result = await chatCerebras(chatMessage, chatModel, enhancedSystem);
           else if (CONFIG.geminiKey)   result = await chatGemini(chatMessage, chatModel, enhancedSystem);
           else if (CONFIG.mistralKey)  result = await chatMistralAI(chatMessage, chatModel, enhancedSystem);
-          else if (CONFIG.hfKey)       result = await chatHuggingFace(chatMessage, chatModel, enhancedSystem);
+          else if (getHfToken())       result = await chatHuggingFace(chatMessage, chatModel, enhancedSystem);
           else                         result = await chatLLM7(chatMessage, chatModel, enhancedSystem);
         } catch (fallbackErr) {
           // LLM7 je uvijek zadnji resort — bez ključa
@@ -1138,7 +1219,7 @@ app.post('/chat/stream', async (req, res) => {
     } else if (provider === 'siliconflow' && CONFIG.siliconKey) {
       const modelToUse = resolveProviderModel('siliconflow', chatModel);
       await streamOpenAICompat({ baseUrl: 'https://api.siliconflow.cn/v1', apiKey: CONFIG.siliconKey, model: modelToUse, provider: 'siliconflow', message: chatMessage, system: enhancedSystem, res, history });
-    } else if (provider === 'huggingface' && CONFIG.hfKey) {
+    } else if (provider === 'huggingface' && getHfToken()) {
       await streamHuggingFace(chatMessage, chatModel, enhancedSystem, res, history);
     } else if (provider === 'llm7') {
       const modelToUse = resolveProviderModel('llm7', chatModel);
@@ -1153,7 +1234,7 @@ app.post('/chat/stream', async (req, res) => {
       } catch {
         try {
           if (CONFIG.groqKey)    result = await chatGroq(chatMessage, chatModel, enhancedSystem);
-          else if (CONFIG.hfKey) result = await chatHuggingFace(chatMessage, chatModel, enhancedSystem);
+          else if (getHfToken()) result = await chatHuggingFace(chatMessage, chatModel, enhancedSystem);
           else                   result = await chatLLM7(chatMessage, chatModel, enhancedSystem);
         } catch { result = await chatLLM7(chatMessage, 'deepseek-chat', enhancedSystem); }
       }
@@ -1234,9 +1315,9 @@ app.get('/models/providers', (req, res) => {
       name: '🤗 HuggingFace',
       badge: 'HF',
       description: '50GB storage, cloud inference',
-      configured: !!CONFIG.hfKey,
+      configured: !!getHfToken(),
       key_url: 'https://huggingface.co/settings/tokens',
-      models: Object.entries(HF_MODELS).map(([id, m]) => ({ id, ...m, provider: 'huggingface' })),
+      models: Object.entries(getHfModelCatalog()).map(([id, m]) => ({ id, ...m, provider: 'huggingface' })),
     },
     {
       id: 'ollama',
@@ -1253,10 +1334,10 @@ app.get('/models/providers', (req, res) => {
 
 // ===== HuggingFace Models List (backwards compat) =====
 app.get('/models/huggingface', (req, res) => {
-  const models = Object.entries(HF_MODELS).map(([id, info]) => ({
-    id, name: info.name, size: info.size, source: 'huggingface', available: !!CONFIG.hfKey,
+  const models = Object.entries(getHfModelCatalog()).map(([id, info]) => ({
+    id, name: info.name, size: info.size, source: 'huggingface', available: !!getHfToken(),
   }));
-  res.json({ models, configured: !!CONFIG.hfKey });
+  res.json({ models, configured: !!getHfToken() });
 });
 
 // ===== Analytics Endpoint =====
@@ -1912,8 +1993,8 @@ app.get('/config', (req, res) => {
     provider: CONFIG.defaultProvider,
     groq: !!CONFIG.groqKey,
     gemini: !!CONFIG.geminiKey,
-    huggingface: !!CONFIG.hfKey,
-    hf_models: CONFIG.hfKey ? Object.keys(HF_MODELS).length : 0,
+    huggingface: !!getHfToken(),
+    hf_models: Object.keys(getHfModelCatalog()).length,
   });
 });
 
@@ -2000,7 +2081,7 @@ server.listen(PORT, '0.0.0.0', () => {
 ║  Supabase: ${(supabase ? '✅ connected' : '❌ not set').padEnd(37)}║
 ║  Groq:     ${(CONFIG.groqKey ? '✅ configured' : '❌ not set').padEnd(37)}║
 ║  Gemini:   ${(CONFIG.geminiKey ? '✅ configured' : '❌ not set').padEnd(37)}║
-║  HuggFace: ${(CONFIG.hfKey ? '✅ ' + Object.keys(HF_MODELS).length + ' models available' : '❌ not set').padEnd(37)}║
+║  HuggFace: ${(getHfToken() ? '✅ ' + Object.keys(getHfModelCatalog()).length + ' models available' : '❌ not set').padEnd(37)}║
 ║  Health:   http://localhost:${PORT}/status          ║
 ╚══════════════════════════════════════════════════╝
   `);

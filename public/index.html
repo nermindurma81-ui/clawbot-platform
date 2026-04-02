@@ -359,6 +359,15 @@ return { output: 'Hello!' }
             <label>System Prompt</label>
             <textarea id="setting-system" rows="4" placeholder="You are a helpful AI assistant..."></textarea>
           </div>
+          <div class="setting-group">
+            <label>HuggingFace Token</label>
+            <input type="password" id="setting-hf-token" placeholder="hf_... (optional runtime token)">
+          </div>
+          <div class="setting-group">
+            <label>Custom HuggingFace Models (one per line)</label>
+            <textarea id="setting-hf-models" rows="4" placeholder="meta-llama/Llama-3.1-8B-Instruct&#10;Qwen/Qwen2.5-72B-Instruct"></textarea>
+          </div>
+          <button class="btn-sm" onclick="saveHuggingFaceSettings()">Save HF Token & Models</button>
           <button class="btn-primary" onclick="saveSettings()">Save Settings</button>
         </div>
       </div>

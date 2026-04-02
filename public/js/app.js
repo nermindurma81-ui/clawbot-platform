@@ -804,6 +804,47 @@ function saveSettings() {
     });
 }
 
+async function saveHuggingFaceSettings() {
+  const token = document.getElementById('setting-hf-token')?.value?.trim() || '';
+  const customModelsRaw = document.getElementById('setting-hf-models')?.value || '';
+  const custom_models = customModelsRaw
+    .split('\n')
+    .map(v => v.trim())
+    .filter(Boolean);
+
+  try {
+    const res = await fetch(`${API}/settings/providers/huggingface`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      },
+      body: JSON.stringify({ token, custom_models }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Save failed');
+    alert(`✅ ${data.message || 'HuggingFace settings saved'}`);
+    await refreshModels();
+  } catch (err) {
+    alert(`❌ ${err.message}`);
+  }
+}
+
+async function loadProviderSettings() {
+  try {
+    const res = await fetch(`${API}/settings/providers`, {
+      headers: { ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const hf = data.huggingface || {};
+    const tokenInput = document.getElementById('setting-hf-token');
+    const modelsInput = document.getElementById('setting-hf-models');
+    if (tokenInput) tokenInput.value = '';
+    if (modelsInput) modelsInput.value = (hf.custom_models || []).join('\n');
+  } catch {}
+}
+
 async function loadSettings() {
   try {
     const res = await fetch(`${API}/settings`, {
@@ -817,6 +858,7 @@ async function loadSettings() {
       document.getElementById('setting-system').value = s.system_prompt || '';
     }
   } catch {}
+  await loadProviderSettings();
 }
 
 // ===== Skills Management =====
