@@ -1820,6 +1820,63 @@ async function fetchMarketplaceSkillBySlug(slug) {
   return null;
 }
 
+const AWESOME_CATEGORIES = [
+  'ai-and-llms.md', 'apple-apps-and-services.md', 'browser-and-automation.md', 'calendar-and-scheduling.md',
+  'clawdbot-tools.md', 'cli-utilities.md', 'coding-agents-and-ides.md', 'communication.md',
+  'data-and-analytics.md', 'devops-and-cloud.md', 'gaming.md', 'git-and-github.md',
+  'health-and-fitness.md', 'image-and-video-generation.md', 'ios-and-macos-development.md',
+  'marketing-and-sales.md', 'media-and-streaming.md', 'moltbook.md', 'notes-and-pkm.md',
+  'pdf-and-documents.md', 'personal-development.md', 'productivity-and-tasks.md', 'search-and-research.md',
+  'security-and-passwords.md', 'self-hosted-and-automation.md', 'shopping-and-e-commerce.md',
+  'smart-home-and-iot.md', 'speech-and-transcription.md', 'transportation.md', 'web-and-frontend-development.md',
+];
+
+function parseAwesomeCategorySkills(markdown = '') {
+  const out = [];
+  const seen = new Set();
+  const re = /\[([^\]]+)\]\(([^)]+)\)/g;
+  let m;
+  while ((m = re.exec(markdown)) !== null) {
+    const name = String(m[1] || '').trim();
+    const url = String(m[2] || '').trim();
+    if (!name || name.toLowerCase().includes('back to main list')) continue;
+    if (url.includes('../README') || url.includes('#table-of-contents')) continue;
+    const key = `${name}::${url}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ name, url });
+  }
+  return out;
+}
+
+async function installSkillByAnyMethod(skillRef) {
+  const slug = skillRef.name;
+  const skillsManager = loadedSkills['skills'];
+  if (skillsManager?.handler?.install) {
+    try {
+      const result = await skillsManager.handler.install(slug, 'clawhub');
+      if (result?.success) return { success: true, method: 'skills-manager', slug, result };
+    } catch {}
+  }
+
+  try {
+    const market = await fetchMarketplaceSkillBySlug(slug);
+    if (market) {
+      let content = market.content;
+      if (!content && market.download_url) {
+        const dl = await fetch(market.download_url, { signal: AbortSignal.timeout(10000) });
+        if (dl.ok) content = await dl.text();
+      }
+      if (content && loadedSkills.upload?.handler?.installSkillMd) {
+        const result = await loadedSkills.upload.handler.installSkillMd(content, 'skill.md');
+        if (result?.success) return { success: true, method: 'market-fallback', slug, result };
+      }
+    }
+  } catch {}
+
+  return { success: false, slug, error: `Failed to install '${slug}'` };
+}
+
 app.get('/marketplace', async (req, res) => {
   const query = req.query.q || '';
   const limit = parseInt(req.query.limit) || 20;
@@ -1867,6 +1924,40 @@ app.post('/marketplace/install/:slug', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+app.post('/skills/bootstrap-awesome', async (req, res) => {
+  const perCategory = Math.max(1, Math.min(5, parseInt(req.body?.perCategory ?? 5, 10) || 5));
+  const maxCategories = Math.max(1, Math.min(AWESOME_CATEGORIES.length, parseInt(req.body?.maxCategories ?? AWESOME_CATEGORIES.length, 10) || AWESOME_CATEGORIES.length));
+  const selectedCategories = AWESOME_CATEGORIES.slice(0, maxCategories);
+  const report = { perCategory, categories: [], installed: [], failed: [] };
+
+  for (const categoryFile of selectedCategories) {
+    const rawUrl = `https://raw.githubusercontent.com/VoltAgent/awesome-openclaw-skills/main/categories/${categoryFile}`;
+    let markdown = '';
+    try {
+      const r = await fetch(rawUrl, { signal: AbortSignal.timeout(15000) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      markdown = await r.text();
+    } catch (err) {
+      report.categories.push({ category: categoryFile, picked: 0, error: err.message });
+      continue;
+    }
+
+    const parsed = parseAwesomeCategorySkills(markdown).slice(0, perCategory);
+    report.categories.push({ category: categoryFile, picked: parsed.length });
+    for (const skillRef of parsed) {
+      const result = await installSkillByAnyMethod(skillRef);
+      if (result.success) report.installed.push({ category: categoryFile, slug: skillRef.name, method: result.method });
+      else report.failed.push({ category: categoryFile, slug: skillRef.name, error: result.error });
+    }
+  }
+
+  res.json({
+    success: true,
+    message: `Bootstrap complete. Installed: ${report.installed.length}, failed: ${report.failed.length}`,
+    ...report,
+  });
 });
 
 // ===== Auto-Update Skills =====
