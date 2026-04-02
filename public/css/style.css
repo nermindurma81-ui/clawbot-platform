@@ -25,15 +25,11 @@ html, body {
   height: 100%;
   width: 100%;
   overflow: hidden;
-  position: fixed;
-  top: 0;
-  left: 0;
   -webkit-text-size-adjust: 100%;
-  -webkit-overflow-scrolling: touch;
 }
 
 /* ===== Screens ===== */
-.screen { display: none; height: 100%; width: 100%; position: absolute; top: 0; left: 0; }
+.screen { display: none; height: 100dvh; width: 100%; }
 .screen.active { display: flex; }
 
 /* ===== Auth Screen ===== */
@@ -772,6 +768,8 @@ html, body {
   /* App layout: stack vertically, hide sidebar */
   #app.screen.active {
     flex-direction: column;
+    height: 100dvh;
+    overflow: hidden;
   }
 
   /* Sidebar: hidden by default on mobile */
@@ -781,7 +779,7 @@ html, body {
     left: -100%;
     width: 80%;
     max-width: 280px;
-    height: 100vh;
+    height: 100dvh;
     z-index: 200;
     transition: left 0.3s ease;
     background: var(--bg-secondary);
@@ -833,7 +831,8 @@ html, body {
   /* Chat: full screen */
   .chat-messages {
     padding: 10px;
-    height: calc(100vh - 120px);
+    flex: 1;
+    overflow-y: auto;
   }
 
   .message {
