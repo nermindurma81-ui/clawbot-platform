@@ -132,11 +132,17 @@ function showAuthError(msg) {
 }
 
 // ===== Navigation =====
-function showPanel(name) {
-  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+function showPanel(name, swipeDir) {
+  document.querySelectorAll('.panel').forEach(p => {
+    p.classList.remove('active', 'swipe-left', 'swipe-right');
+  });
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.querySelectorAll('.bottom-nav-item').forEach(n => n.classList.remove('active'));
-  document.getElementById(`panel-${name}`).classList.add('active');
+  
+  const panel = document.getElementById(`panel-${name}`);
+  panel.classList.add('active');
+  if (swipeDir) panel.classList.add(swipeDir === 1 ? 'swipe-left' : 'swipe-right');
+  
   const sidebarItem = document.querySelector(`.nav-item[data-panel="${name}"]`);
   if (sidebarItem) sidebarItem.classList.add('active');
   const bottomItem = document.querySelector(`.bottom-nav-item[data-panel="${name}"]`);
@@ -151,6 +157,10 @@ function showPanel(name) {
     document.querySelector('.sidebar').classList.remove('open');
     document.getElementById('sidebar-overlay').classList.remove('show');
   }
+  
+  // Update panel index
+  const idx = PANELS.indexOf(name);
+  if (idx !== -1) currentPanelIndex = idx;
 }
 
 // ===== Mobile Sidebar =====
@@ -789,8 +799,71 @@ async function uploadMemory() {
   if (data.success) { document.getElementById('memory-status').textContent = '✅ Loaded'; document.getElementById('memory-input').value = ''; alert(data.message); }
 }
 
-// ===== Helpers =====
-function formatSize(bytes) {
+// ===== Swipe Navigation =====
+let touchStartX = 0;
+let touchStartY = 0;
+let touchEndX = 0;
+let isSwiping = false;
+
+const PANELS = ['chat', 'history', 'skills', 'settings'];
+let currentPanelIndex = 0;
+
+function initSwipe() {
+  const main = document.querySelector('.main-content');
+  if (!main) return;
+
+  main.addEventListener('touchstart', (e) => {
+    // Don't swipe if input is focused
+    if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+    touchStartX = e.changedTouches[0].screenX;
+    touchStartY = e.changedTouches[0].screenY;
+    isSwiping = true;
+  }, { passive: true });
+
+  main.addEventListener('touchend', (e) => {
+    if (!isSwiping) return;
+    isSwiping = false;
+    touchEndX = e.changedTouches[0].screenX;
+    const touchEndY = e.changedTouches[0].screenY;
+    
+    const diffX = touchEndX - touchStartX;
+    const diffY = touchEndY - touchStartY;
+    
+    // Only horizontal swipes (ignore vertical scrolling)
+    if (Math.abs(diffX) < 60 || Math.abs(diffY) > Math.abs(diffX)) return;
+    
+    const threshold = 80;
+    
+    if (diffX < -threshold) {
+      // Swipe left → next panel
+      navigatePanel(1);
+    } else if (diffX > threshold) {
+      // Swipe right → prev panel
+      navigatePanel(-1);
+    }
+  }, { passive: true });
+}
+
+function navigatePanel(direction) {
+  // Update current index based on active panel
+  const activePanel = document.querySelector('.panel.active');
+  if (activePanel) {
+    const panelName = activePanel.id.replace('panel-', '');
+    const idx = PANELS.indexOf(panelName);
+    if (idx !== -1) currentPanelIndex = idx;
+  }
+  
+  currentPanelIndex += direction;
+  if (currentPanelIndex < 0) currentPanelIndex = 0;
+  if (currentPanelIndex >= PANELS.length) currentPanelIndex = PANELS.length - 1;
+  
+  showPanel(PANELS[currentPanelIndex], direction);
+}
+
+// Init swipe on load
+document.addEventListener('DOMContentLoaded', () => {
+  initSwipe();
+});
   if (!bytes) return 'Unknown';
   const gb = bytes / (1024 ** 3);
   return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(bytes / (1024 ** 2)).toFixed(0)} MB`;
