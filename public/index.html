@@ -16,8 +16,15 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 </head>
 <body>
+  <script>
+    // Force show app immediately
+    document.addEventListener('DOMContentLoaded', function() {
+      document.getElementById('auth-screen').classList.remove('active');
+      document.getElementById('app').classList.add('active');
+    });
+  </script>
   <!-- ===== Auth Screen ===== -->
-  <div id="auth-screen" class="screen active">
+  <div id="auth-screen" class="screen" style="display:none;">
     <div class="auth-container">
       <div class="logo">🐾</div>
       <h1>ClawBot Platform</h1>
