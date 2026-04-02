@@ -1886,15 +1886,20 @@ app.get('/marketplace', async (req, res) => {
     if (skills.length) {
       return res.json({ skills, source: 'clawhub' });
     }
-    throw new Error('Marketplace unavailable');
-  } catch {
-    // Fallback: return installed skills
+    throw new Error('Marketplace unavailable or empty response');
+  } catch (err) {
+    // Transparent fallback: return local skills but mark response as degraded
     const skills = Object.entries(loadedSkills).map(([id, s]) => ({
       id, name: s.name || id, description: s.description || '',
       slug: id,
       icon: s.icon || '🔧', triggers: s.triggers || [], installed: true,
     }));
-    res.json({ skills, source: 'local' });
+    res.status(502).json({
+      error: 'Marketplace temporarily unavailable',
+      details: err.message,
+      source: 'local-fallback',
+      skills,
+    });
   }
 });
 
@@ -1953,8 +1958,13 @@ app.post('/skills/bootstrap-awesome', async (req, res) => {
     }
   }
 
-  res.json({
-    success: true,
+  const success = report.installed.length > 0 && report.failed.length === 0 && report.categories.every(c => !c.error);
+  const partial = report.installed.length > 0 && !success;
+  const statusCode = success ? 200 : (partial ? 207 : 502);
+
+  res.status(statusCode).json({
+    success,
+    partial,
     message: `Bootstrap complete. Installed: ${report.installed.length}, failed: ${report.failed.length}`,
     ...report,
   });

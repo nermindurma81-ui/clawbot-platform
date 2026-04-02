@@ -1274,9 +1274,14 @@ async function loadMarketplace(query = '') {
     const url = query ? `${API}/marketplace?q=${encodeURIComponent(query)}` : `${API}/marketplace`;
     const res = await fetch(url);
     const data = await res.json();
-    return data.skills || [];
+    return {
+      skills: data.skills || [],
+      source: data.source || (res.ok ? 'clawhub' : 'local-fallback'),
+      warning: data.error || null,
+      ok: res.ok,
+    };
   } catch {
-    return [];
+    return { skills: [], source: 'offline', warning: 'Marketplace request failed', ok: false };
   }
 }
 
@@ -1307,14 +1312,17 @@ async function searchSkills() {
   }
 
   resultsEl.innerHTML = '<div class="loading">Searching...</div>';
-  const skills = await loadMarketplace(query);
+  const mp = await loadMarketplace(query);
+  const skills = mp.skills || [];
 
   if (!skills.length) {
-    resultsEl.innerHTML = '<div class="loading">No matching skills found.</div>';
+    const warn = mp.warning ? `<div class="loading error">⚠️ ${mp.warning}</div>` : '';
+    resultsEl.innerHTML = `${warn}<div class="loading">No matching skills found.</div>`;
     return;
   }
 
-  resultsEl.innerHTML = skills.map(s => `
+  const sourceBadge = mp.source === 'clawhub' ? '🌐 ClawHub' : '⚠️ Local fallback';
+  resultsEl.innerHTML = `<div class="loading" style="text-align:left">${sourceBadge}</div>` + skills.map(s => `
     <div class="marketplace-item">
       <div class="mi-header">
         <span class="mi-icon">${s.icon || '🔧'}</span>
@@ -1397,14 +1405,17 @@ async function loadMarketplaceUI() {
   const container = document.getElementById('marketplace-list');
   container.innerHTML = '<div class="loading">Loading marketplace...</div>';
   
-  const skills = await loadMarketplace();
+  const mp = await loadMarketplace();
+  const skills = mp.skills || [];
   
   if (skills.length === 0) {
-    container.innerHTML = '<p style="text-align:center;color:var(--text-secondary)">No skills found</p>';
+    const warn = mp.warning ? `<p style="text-align:center;color:var(--warning)">⚠️ ${mp.warning}</p>` : '';
+    container.innerHTML = `${warn}<p style="text-align:center;color:var(--text-secondary)">No skills found</p>`;
     return;
   }
   
-  container.innerHTML = skills.map(s => `
+  const sourceBadge = mp.source === 'clawhub' ? '🌐 ClawHub registry' : '⚠️ Local fallback (market offline)';
+  container.innerHTML = `<p style="text-align:center;color:var(--text-secondary);margin-bottom:8px">${sourceBadge}</p>` + skills.map(s => `
     <div class="marketplace-item">
       <div class="mi-header">
         <span class="mi-icon">${s.icon || '🔧'}</span>
