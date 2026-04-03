@@ -812,11 +812,16 @@ function updateStatusIndicator(id, status) {
 
 // ===== Settings =====
 function saveSettings() {
+  const enabledSkillIds = Array.from(document.querySelectorAll('#settings-skill-manager input[type="checkbox"]:checked'))
+    .map(el => el.value);
   const settings = {
     ollama_url: document.getElementById('setting-ollama').value,
     gateway_url: document.getElementById('setting-gateway').value,
     model: document.getElementById('setting-model').value,
     system_prompt: document.getElementById('setting-system').value,
+    enabled_skills: enabledSkillIds,
+    strict_skill_mode: document.getElementById('setting-strict-skill-mode')?.value !== 'false',
+    skill_instructions: document.getElementById('setting-skill-instructions')?.value || '',
     theme: isDarkTheme ? 'dark' : 'light',
   };
 
@@ -838,6 +843,7 @@ function saveSettings() {
 
 let providerSettingsCache = {};
 let providerModelsCache = {};
+let settingsSkillsCache = [];
 
 async function loadProviderCatalogsForSettings() {
   try {
@@ -962,11 +968,44 @@ async function loadSettings() {
         if (modelMobileSel) modelMobileSel.value = s.model;
       }
       document.getElementById('setting-system').value = s.system_prompt || '';
+      const strictModeEl = document.getElementById('setting-strict-skill-mode');
+      if (strictModeEl) strictModeEl.value = s.strict_skill_mode === false ? 'false' : 'true';
+      const skillInstEl = document.getElementById('setting-skill-instructions');
+      if (skillInstEl) skillInstEl.value = s.skill_instructions || '';
+      await loadSettingsSkillManager(Array.isArray(s.enabled_skills) ? s.enabled_skills : []);
     }
   } catch {}
   await loadProviderSettings();
   await loadProviderCatalogsForSettings();
   populateProviderConfigForm();
+  if (!document.getElementById('settings-skill-manager')?.innerHTML?.trim()) {
+    await loadSettingsSkillManager([]);
+  }
+}
+
+async function loadSettingsSkillManager(selectedSkillIds = []) {
+  const host = document.getElementById('settings-skill-manager');
+  if (!host) return;
+  try {
+    const res = await fetch(`${API}/skills`);
+    const data = await res.json();
+    settingsSkillsCache = data.skills || [];
+  } catch {
+    settingsSkillsCache = [];
+  }
+
+  if (!settingsSkillsCache.length) {
+    host.innerHTML = '<div class="loading">No skills available</div>';
+    return;
+  }
+
+  host.innerHTML = settingsSkillsCache.map(skill => `
+    <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <input type="checkbox" value="${skill.id}" ${selectedSkillIds.includes(skill.id) ? 'checked' : ''}>
+      <span>${skill.icon || '🔧'} ${skill.name}</span>
+      <small style="margin-left:auto;color:var(--text-secondary)">${skill.active === false ? 'disabled' : 'active'}</small>
+    </label>
+  `).join('');
 }
 
 // ===== Skills Management =====
@@ -1011,6 +1050,9 @@ async function refreshSkills() {
     `).join('');
 
     loadConfig();
+    const selected = Array.from(document.querySelectorAll('#settings-skill-manager input[type="checkbox"]:checked'))
+      .map(el => el.value);
+    loadSettingsSkillManager(selected);
   } catch (err) {
     list.innerHTML = `<div class="loading error">${err.message}</div>`;
   }
@@ -1062,10 +1104,16 @@ async function installSkillMd() {
   if (!content) return alert('Paste skill.md content first');
 
   const resultEl = document.getElementById('install-result');
+  const progressEl = document.getElementById('skill-install-progress');
   resultEl.classList.remove('hidden');
+  if (progressEl) {
+    progressEl.classList.remove('hidden');
+    progressEl.textContent = '⏳ Parsing skill.md...';
+  }
   resultEl.innerHTML = '<div class="loading">Installing...</div>';
 
   try {
+    if (progressEl) progressEl.textContent = '⚡ Installing and activating skill...';
     const res = await fetch(`${API}/upload/skill`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1078,6 +1126,8 @@ async function installSkillMd() {
     if (data.success) { document.getElementById('skill-md-input').value = ''; refreshSkills(); }
   } catch (err) {
     resultEl.innerHTML = `<div class="error-msg">❌ ${err.message}</div>`;
+  } finally {
+    if (progressEl) progressEl.classList.add('hidden');
   }
 }
 
@@ -1086,10 +1136,16 @@ async function installSkillFromUrl() {
   if (!url) return;
 
   const resultEl = document.getElementById('install-result');
+  const progressEl = document.getElementById('skill-url-progress');
   resultEl.classList.remove('hidden');
+  if (progressEl) {
+    progressEl.classList.remove('hidden');
+    progressEl.textContent = '⏳ Downloading skill...';
+  }
   resultEl.innerHTML = '<div class="loading">Installing...</div>';
 
   try {
+    if (progressEl) progressEl.textContent = '⚡ Installing and syncing...';
     const res = await fetch(`${API}/upload/url`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1102,6 +1158,8 @@ async function installSkillFromUrl() {
     if (data.success) { document.getElementById('skill-url-input').value = ''; refreshSkills(); }
   } catch (err) {
     resultEl.innerHTML = `<div class="error-msg">❌ ${err.message}</div>`;
+  } finally {
+    if (progressEl) progressEl.classList.add('hidden');
   }
 }
 
@@ -1467,5 +1525,12 @@ document.getElementById('zip-upload')?.addEventListener('change', async (e) => {
     if (status) status.textContent = `❌ ${err.message}`;
   } finally {
     e.target.value = '';
+  }
+});
+
+document.getElementById('skill-md-input')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey || !e.shiftKey)) {
+    e.preventDefault();
+    installSkillMd();
   }
 });

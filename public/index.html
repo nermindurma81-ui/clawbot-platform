@@ -250,11 +250,13 @@ keyword1, keyword2, keyword3
 \`\`\`js
 return { output: 'Hello!' }
 \`\`\`"></textarea>
+              <div id="skill-install-progress" class="loading hidden" style="margin:8px 0"></div>
               <button class="btn-primary" onclick="installSkillMd()">Install</button>
             </div>
 
             <div id="install-url" class="install-tab-content hidden">
               <input type="text" id="skill-url-input" placeholder="https://github.com/.../skill.md" onkeyup="if(event.key==='Enter')installSkillFromUrl()">
+              <div id="skill-url-progress" class="loading hidden" style="margin:8px 0"></div>
               <button class="btn-primary" onclick="installSkillFromUrl()">Install from URL</button>
             </div>
 
@@ -364,6 +366,21 @@ return { output: 'Hello!' }
           <div class="setting-group">
             <label>System Prompt</label>
             <textarea id="setting-system" rows="4" placeholder="You are a helpful AI assistant..."></textarea>
+          </div>
+          <div class="setting-group">
+            <label>Skill Manager (enabled skills)</label>
+            <div id="settings-skill-manager" class="loading">Loading skills...</div>
+          </div>
+          <div class="setting-group">
+            <label>Skill enforcement</label>
+            <select id="setting-strict-skill-mode">
+              <option value="true">Strict (model must follow skill instructions)</option>
+              <option value="false">Flexible</option>
+            </select>
+          </div>
+          <div class="setting-group">
+            <label>Default skill instructions (optional)</label>
+            <textarea id="setting-skill-instructions" rows="3" placeholder="Always prioritize installed skills knowledge before generic answer..."></textarea>
           </div>
           <div class="setting-group">
             <label>Provider Config (Token + Custom Models)</label>

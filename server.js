@@ -442,12 +442,14 @@ app.post('/settings/soul', async (req, res) => {
   fs.writeFileSync(path.join(DATA_DIR, 'soul.md'), content);
   soulCache = content;
 
+  const merged = mergeAndSaveLocalSettings({ soul: content });
+
   // Sync to Supabase
   if (supabase && req.user) {
     try {
-      await supabase.from('user_settings').upsert({
+      await (supabaseAdmin || supabase).from('user_settings').upsert({
         user_id: req.user.id,
-        settings: { soul: content },
+        settings: merged,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'user_id' });
     } catch {}
@@ -470,13 +472,14 @@ app.post('/settings/memory', async (req, res) => {
     fs.writeFileSync(memoryPath, content);
   }
   memoryCache = fs.readFileSync(memoryPath, 'utf8');
+  const merged = mergeAndSaveLocalSettings({ memory: memoryCache });
 
   // Sync to Supabase
   if (supabase && req.user) {
     try {
-      await supabase.from('user_settings').upsert({
+      await (supabaseAdmin || supabase).from('user_settings').upsert({
         user_id: req.user.id,
-        settings: { memory: memoryCache },
+        settings: merged,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'user_id' });
     } catch {}
@@ -496,6 +499,9 @@ function getDefaultSettings() {
     system_prompt: '',
     soul: '',
     memory: '',
+    enabled_skills: [],
+    strict_skill_mode: true,
+    skill_instructions: '',
   };
 }
 
@@ -510,6 +516,29 @@ function getLocalSettings() {
 function saveLocalSettings(settings) {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(path.join(DATA_DIR, 'settings.json'), JSON.stringify(settings, null, 2));
+}
+
+function mergeAndSaveLocalSettings(partial) {
+  const current = getLocalSettings();
+  const merged = { ...current, ...(partial || {}) };
+  saveLocalSettings(merged);
+  return merged;
+}
+
+async function getEffectiveSettings(req) {
+  const local = getLocalSettings();
+  if (!supabase || !req?.user?.id) return local;
+  try {
+    const { data, error } = await (supabaseAdmin || supabase)
+      .from('user_settings')
+      .select('settings')
+      .eq('user_id', req.user.id)
+      .single();
+    if (error || !data?.settings) return local;
+    return { ...local, ...data.settings };
+  } catch {
+    return local;
+  }
 }
 
 // ===== Ollama Proxy =====
@@ -1075,6 +1104,19 @@ function detectSkill(message) {
   return null;
 }
 
+function buildSelectedSkillsContext(skillIds = []) {
+  const ids = Array.isArray(skillIds) ? skillIds : [];
+  if (!ids.length) return '';
+  const lines = [];
+  for (const id of ids) {
+    const skill = loadedSkills[id];
+    if (!skill || !isSkillActive(id)) continue;
+    lines.push(`- ${id}: ${skill.description || 'No description'}${Array.isArray(skill.triggers) && skill.triggers.length ? ` (triggers: ${skill.triggers.join(', ')})` : ''}`);
+  }
+  if (!lines.length) return '';
+  return `[Enabled Skills Knowledge]\nUse these installed skills as authoritative context when relevant:\n${lines.join('\n')}`;
+}
+
 // ===== Bot Chat Endpoint (auto-select provider + skill routing) =====
 app.post('/chat', async (req, res) => {
   const { message, model, system } = req.body;
@@ -1083,6 +1125,13 @@ app.post('/chat', async (req, res) => {
   const provider = req.body.provider || CONFIG.defaultProvider;
 
   try {
+    const effectiveSettings = await getEffectiveSettings(req);
+    const allowedSkills = Array.isArray(effectiveSettings.enabled_skills)
+      ? effectiveSettings.enabled_skills.map(v => String(v || '').trim()).filter(Boolean)
+      : [];
+    const strictSkillMode = effectiveSettings.strict_skill_mode !== false;
+    const skillInstructions = String(effectiveSettings.skill_instructions || '').trim();
+
     // Build enhanced system prompt with SOUL + MEMORY
     let enhancedSystem = system || '';
     if (soulCache) {
@@ -1091,9 +1140,14 @@ app.post('/chat', async (req, res) => {
     if (memoryCache) {
       enhancedSystem = `${enhancedSystem}\n\n[Memory - Context]\n${memoryCache.substring(0, 2000)}`;
     }
+    const selectedSkillsContext = buildSelectedSkillsContext(allowedSkills);
+    if (selectedSkillsContext) enhancedSystem = `${enhancedSystem}\n\n${selectedSkillsContext}`;
 
     // Auto-detect skill triggers
-    const matchedSkill = detectSkill(message);
+    let matchedSkill = detectSkill(message);
+    if (matchedSkill && allowedSkills.length && !allowedSkills.includes(matchedSkill.id)) {
+      matchedSkill = null;
+    }
     let skillResult = null;
 
     if (matchedSkill) {
@@ -1104,6 +1158,9 @@ app.post('/chat', async (req, res) => {
           if (skillResult.instructions) {
             // Skill wants LLM to process — add context to system prompt
             enhancedSystem = `${enhancedSystem}\n\n[Skill: ${matchedSkill.id}]\n${skillResult.systemPrompt || ''}\n\nTask: ${skillResult.instructions}\n${skillResult.context ? 'Context: ' + skillResult.context : ''}`;
+            if (strictSkillMode) {
+              enhancedSystem += `\n\n[MANDATORY SKILL EXECUTION]\nYou MUST prioritize and follow the active skill instructions before any other reasoning.`;
+            }
           } else if (skillResult.response || skillResult.output || skillResult.translated) {
             // Skill has direct answer — return it
             return res.json({
@@ -1121,6 +1178,9 @@ app.post('/chat', async (req, res) => {
 
     let result;
     const chatMessage = skillResult?.instructions ? skillResult.instructions : message;
+    if (!matchedSkill && strictSkillMode && skillInstructions) {
+      enhancedSystem = `${enhancedSystem}\n\n[Skill manager default instructions]\n${skillInstructions}`;
+    }
 
     // Skill can override model (e.g. knowledge uses 70B)
     const chatModel = skillResult?.model || model;
@@ -1194,13 +1254,25 @@ app.post('/chat/stream', async (req, res) => {
   const provider = req.body.provider || CONFIG.defaultProvider;
 
   try {
+    const effectiveSettings = await getEffectiveSettings(req);
+    const allowedSkills = Array.isArray(effectiveSettings.enabled_skills)
+      ? effectiveSettings.enabled_skills.map(v => String(v || '').trim()).filter(Boolean)
+      : [];
+    const strictSkillMode = effectiveSettings.strict_skill_mode !== false;
+    const skillInstructions = String(effectiveSettings.skill_instructions || '').trim();
+
     // Build enhanced system prompt with SOUL + MEMORY
     let enhancedSystem = system || '';
     if (soulCache) enhancedSystem = `[Bot Personality]\n${soulCache}\n\n${enhancedSystem}`;
     if (memoryCache) enhancedSystem = `${enhancedSystem}\n\n[Memory]\n${memoryCache.substring(0, 2000)}`;
+    const selectedSkillsContext = buildSelectedSkillsContext(allowedSkills);
+    if (selectedSkillsContext) enhancedSystem = `${enhancedSystem}\n\n${selectedSkillsContext}`;
 
     // Skill detection
-    const matchedSkill = detectSkill(message);
+    let matchedSkill = detectSkill(message);
+    if (matchedSkill && allowedSkills.length && !allowedSkills.includes(matchedSkill.id)) {
+      matchedSkill = null;
+    }
     let skillResult = null;
     let chatMessage = message;
     let chatModel = model;
@@ -1212,9 +1284,12 @@ app.post('/chat/stream', async (req, res) => {
           skillResult = await skill.handler.run(matchedSkill.params);
           if (skillResult.instructions) {
             enhancedSystem = `${enhancedSystem}\n\n[Skill: ${matchedSkill.id}]\n${skillResult.systemPrompt || ''}\nTask: ${skillResult.instructions}`;
+            if (strictSkillMode) {
+              enhancedSystem += `\n\n[MANDATORY SKILL EXECUTION]\nYou MUST prioritize and follow the active skill instructions before any other reasoning.`;
+            }
             chatMessage = skillResult.instructions;
-          } else if (skillResult.response || skillResult.output) {
-            res.write(`data: ${JSON.stringify({ content: skillResult.response || skillResult.output, done: true, skill: matchedSkill.id })}\n\n`);
+          } else if (skillResult.response || skillResult.output || skillResult.translated) {
+            res.write(`data: ${JSON.stringify({ content: skillResult.response || skillResult.output || skillResult.translated, done: true, skill: matchedSkill.id })}\n\n`);
             res.end();
             return;
           }
@@ -1669,6 +1744,42 @@ function isSkillActive(skillId) {
   return !disabledSkills.has(skillId);
 }
 
+function getSkillsSnapshot() {
+  return Object.entries(loadedSkills).map(([id, s]) => ({
+    skill_id: id,
+    skill_name: s.name || id,
+    enabled: isSkillActive(id),
+    config: {
+      description: s.description || '',
+      triggers: s.triggers || [],
+      version: s.version || '1.0.0',
+    },
+  }));
+}
+
+async function syncSkillsToSupabase(userId) {
+  if (!supabase || !userId) return;
+  const client = supabaseAdmin || supabase;
+  const snapshot = getSkillsSnapshot();
+  try {
+    await client.from('user_skills').delete().eq('user_id', userId);
+    if (snapshot.length) {
+      await client.from('user_skills').upsert(
+        snapshot.map(s => ({ user_id: userId, ...s })),
+        { onConflict: 'user_id,skill_id' }
+      );
+    }
+    const merged = mergeAndSaveLocalSettings({ enabled_skills: snapshot.filter(s => s.enabled).map(s => s.skill_id) });
+    await client.from('user_settings').upsert({
+      user_id: userId,
+      settings: merged,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id' });
+  } catch (err) {
+    console.error('Skills sync error:', err.message);
+  }
+}
+
 function loadSingleSkill(dirName) {
   const skillPath = path.join(SKILLS_DIR, dirName, 'index.js');
   const metaPath = path.join(SKILLS_DIR, dirName, 'skill.json');
@@ -1747,6 +1858,7 @@ app.post('/skills/:id/enable', (req, res) => {
   if (!loadedSkills[id]) return res.status(404).json({ error: `Skill '${id}' not found` });
   disabledSkills.delete(id);
   saveSkillsState();
+  syncSkillsToSupabase(req.user?.id);
   res.json({ success: true, id, active: true });
 });
 
@@ -1756,6 +1868,7 @@ app.post('/skills/:id/disable', (req, res) => {
   if (id === 'skills' || id === 'upload') return res.status(403).json({ error: `'${id}' is a core skill and cannot be disabled` });
   disabledSkills.add(id);
   saveSkillsState();
+  syncSkillsToSupabase(req.user?.id);
   res.json({ success: true, id, active: false });
 });
 
@@ -1925,6 +2038,7 @@ app.post('/marketplace/install/:slug', async (req, res) => {
     if (!uploadSkill) return res.status(500).json({ error: 'Upload skill not loaded' });
     
     const result = await uploadSkill.handler.installSkillMd(content, 'skill.md');
+    await syncSkillsToSupabase(req.user?.id);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2001,6 +2115,7 @@ app.post('/skills/update-all', async (req, res) => {
     }
   }
   
+  await syncSkillsToSupabase(req.user?.id);
   res.json({ success: true, results });
 });
 
@@ -2095,7 +2210,7 @@ app.delete('/skills/:id', (req, res) => {
   saveSkillsState();
 
   // Remove from registry
-  const registryPath = path.join(SKILLS_DIR, 'brain', 'skills-registry.json');
+  const registryPath = path.join(__dirname, 'brain', 'skills-registry.json');
   if (fs.existsSync(registryPath)) {
     try {
       const registry = JSON.parse(fs.readFileSync(registryPath));
@@ -2106,6 +2221,7 @@ app.delete('/skills/:id', (req, res) => {
     } catch {}
   }
 
+  syncSkillsToSupabase(req.user?.id);
   res.json({ success: true, removed: id });
 });
 
@@ -2215,6 +2331,7 @@ app.post('/upload/zip', zipUpload.single('zipfile'), async (req, res) => {
       results.errors.push(`Reload error: ${err.message}`);
     }
 
+    await syncSkillsToSupabase(req.user?.id);
     res.json({
       success: true,
       message: `📦 Package installed! Skills: ${results.skills.length}, SOUL: ${results.soul ? '✅' : '❌'}, Memory: ${results.memory ? '✅' : '❌'}`,
@@ -2235,7 +2352,10 @@ app.post('/upload/skill', (req, res) => {
   if (!uploadSkill) return res.status(500).json({ error: 'Upload skill not loaded' });
 
   uploadSkill.handler.installSkillMd(content, filename || 'skill.md')
-    .then(result => res.json(result))
+    .then(async (result) => {
+      await syncSkillsToSupabase(req.user?.id);
+      res.json(result);
+    })
     .catch(err => res.status(500).json({ error: err.message }));
 });
 
@@ -2323,6 +2443,7 @@ app.post('/upload/url', async (req, res) => {
       const uploadSkill = loadedSkills['upload'];
       if (!uploadSkill) return res.status(500).json({ error: 'Upload skill not loaded' });
       const result = await uploadSkill.handler.installSkillMd(content, 'skill.md');
+      await syncSkillsToSupabase(req.user?.id);
       res.json(result);
     }
   } catch (err) {
@@ -2381,3 +2502,6 @@ process.on('SIGTERM', () => {
   console.log('Shutting down...');
   server.close(() => process.exit(0));
 });
+    if (!matchedSkill && strictSkillMode && skillInstructions) {
+      enhancedSystem = `${enhancedSystem}\n\n[Skill manager default instructions]\n${skillInstructions}`;
+    }
