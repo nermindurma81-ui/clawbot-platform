@@ -346,7 +346,8 @@ app.get('/settings', async (req, res) => {
   if (!req.user) return res.json({ settings: getLocalSettings() });
 
   try {
-    const { data, error } = await supabase
+    const client = supabaseAdmin || supabase;
+    const { data, error } = await client
       .from('user_settings')
       .select('*')
       .eq('user_id', req.user.id)
@@ -371,7 +372,8 @@ app.post('/settings', async (req, res) => {
   // Sync to Supabase if authenticated
   if (supabase && req.user) {
     try {
-      const { error } = await supabase
+      const client = supabaseAdmin || supabase;
+      const { error } = await client
         .from('user_settings')
         .upsert({
           user_id: req.user.id,
@@ -1933,10 +1935,15 @@ const CLAWHUB_API_BASE = process.env.CLAWHUB_API_BASE || 'https://registry.clawh
 function normalizeMarketplaceSkill(raw = {}) {
   const slug = raw.slug || raw.id || raw.name || raw.skill_id || '';
   const name = raw.name || raw.title || raw.slug || raw.id || '';
+  const safeSlug = String(slug || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
   return {
-    id: raw.id || slug,
-    slug,
-    name,
+    id: raw.id || safeSlug || slug,
+    slug: safeSlug || slug,
+    name: String(name || safeSlug || slug).trim(),
     description: raw.description || raw.summary || '',
     icon: raw.icon || '🔧',
     content: raw.content || raw.skill_md || null,
@@ -2058,6 +2065,9 @@ async function fetchAwesomeMarketplaceList(limit = 20) {
       const markdown = await response.text();
       const parsed = parseAwesomeCategorySkills(markdown);
       for (const entry of parsed) {
+        if (!entry?.name || !entry?.url) continue;
+        const lowered = entry.url.toLowerCase();
+        if (!lowered.includes('skill') || (!lowered.endsWith('.md') && !lowered.includes('/skills/'))) continue;
         const slug = String(entry.name || '')
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, '-')
@@ -2118,10 +2128,13 @@ app.post('/marketplace/install/:slug', async (req, res) => {
     }
 
     const skill = await fetchMarketplaceSkillBySlug(req.params.slug);
-    if (!skill) return res.status(404).json({ error: `Skill '${req.params.slug}' not found on marketplace` });
-    let content = skill.content;
-    if (!content && skill.download_url) {
-      const dl = await fetch(skill.download_url, { signal: AbortSignal.timeout(10000) });
+    const externalUrl = String(req.body?.download_url || '').trim();
+    if (!skill && !externalUrl) return res.status(404).json({ error: `Skill '${req.params.slug}' not found on marketplace` });
+
+    let content = skill?.content || null;
+    const downloadUrl = skill?.download_url || externalUrl || null;
+    if (!content && downloadUrl) {
+      const dl = await fetch(downloadUrl, { signal: AbortSignal.timeout(10000) });
       if (dl.ok) content = await dl.text();
     }
     if (!content) return res.status(404).json({ error: 'Skill content not found for selected marketplace skill' });

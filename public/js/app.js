@@ -1071,6 +1071,8 @@ async function loadSettings() {
       if (modelMobileSel) modelMobileSel.value = choosePreferredModel(modelMobileSel, requestedModel);
       applySelectedModel(choosePreferredModel(document.getElementById('model-select'), requestedModel));
       document.getElementById('setting-system').value = s.system_prompt || '';
+      const systemMobileEl = document.getElementById('setting-system-mobile');
+      if (systemMobileEl) systemMobileEl.value = s.system_prompt || '';
       if (document.getElementById('agent-input')) document.getElementById('agent-input').value = s.agent_profile || '';
       if (document.getElementById('tools-input')) document.getElementById('tools-input').value = s.tools_profile || '';
       const strictModeEl = document.getElementById('setting-strict-skill-mode');
@@ -1500,8 +1502,15 @@ async function loadMarketplace(query = '') {
 }
 
 async function installFromMarketplace(slug) {
+  if (!slug) return alert('❌ Invalid marketplace skill');
+  const entry = (window.__LAST_MARKETPLACE_ITEMS__ || []).find(s => (s.slug || s.id) === slug);
+  const payload = entry?.download_url ? { download_url: entry.download_url } : null;
   try {
-    const res = await fetch(`${API}/marketplace/install/${slug}`, { method: 'POST' });
+    const res = await fetch(`${API}/marketplace/install/${slug}`, {
+      method: 'POST',
+      headers: payload ? { 'Content-Type': 'application/json' } : {},
+      body: payload ? JSON.stringify(payload) : undefined,
+    });
     const data = await res.json();
     if (data.success) {
       alert(`✅ ${data.name || slug} installed!`);
@@ -1528,6 +1537,7 @@ async function searchSkills() {
   resultsEl.innerHTML = '<div class="loading">Searching...</div>';
   const mp = await loadMarketplace(query);
   const skills = mp.skills || [];
+  window.__LAST_MARKETPLACE_ITEMS__ = skills;
 
   if (!skills.length) {
     const warn = mp.warning ? `<div class="loading error">⚠️ ${mp.warning}</div>` : '';
@@ -1549,7 +1559,7 @@ async function searchSkills() {
           <div class="mi-desc">${s.description || ''}</div>
         </div>
       </div>
-      <button class="btn-sm btn-primary" onclick="installFromMarketplace('${s.slug || s.id}')">
+      <button class="btn-sm btn-primary marketplace-install-btn" onclick="installFromMarketplace('${s.slug || s.id}')">
         ${s.installed ? '✅ Installed' : '⬇️ Install'}
       </button>
     </div>
@@ -1625,6 +1635,7 @@ async function loadMarketplaceUI() {
   
   const mp = await loadMarketplace();
   const skills = mp.skills || [];
+  window.__LAST_MARKETPLACE_ITEMS__ = skills;
   
   if (skills.length === 0) {
     const warn = mp.warning ? `<p style="text-align:center;color:var(--warning)">⚠️ ${mp.warning}</p>` : '';
@@ -1646,7 +1657,7 @@ async function loadMarketplaceUI() {
           <div class="mi-desc">${s.description || ''}</div>
         </div>
       </div>
-      <button class="btn-sm btn-primary" onclick="installFromMarketplace('${s.slug || s.id}')">
+      <button class="btn-sm btn-primary marketplace-install-btn" onclick="installFromMarketplace('${s.slug || s.id}')">
         ${s.installed ? '✅ Installed' : '⬇️ Install'}
       </button>
     </div>
