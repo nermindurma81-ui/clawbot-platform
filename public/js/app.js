@@ -1466,7 +1466,7 @@ async function loadMarketplace(query = '') {
     const data = await res.json();
     return {
       skills: data.skills || [],
-      source: data.source || (res.ok ? 'clawhub' : 'local-fallback'),
+      source: data.source || (res.ok ? 'clawhub' : 'offline'),
       warning: data.error || null,
       ok: res.ok,
     };
@@ -1511,7 +1511,11 @@ async function searchSkills() {
     return;
   }
 
-  const sourceBadge = mp.source === 'clawhub' ? '🌐 ClawHub' : '⚠️ Local fallback';
+  const sourceBadge = mp.source === 'clawhub'
+    ? '🌐 ClawHub'
+    : mp.source === 'awesome-openclaw'
+      ? '📚 Awesome OpenClaw (live index)'
+      : '⚠️ Marketplace offline';
   resultsEl.innerHTML = `<div class="loading" style="text-align:left">${sourceBadge}</div>` + skills.map(s => `
     <div class="marketplace-item">
       <div class="mi-header">
@@ -1604,7 +1608,11 @@ async function loadMarketplaceUI() {
     return;
   }
   
-  const sourceBadge = mp.source === 'clawhub' ? '🌐 ClawHub registry' : '⚠️ Local fallback (market offline)';
+  const sourceBadge = mp.source === 'clawhub'
+    ? '🌐 ClawHub registry'
+    : mp.source === 'awesome-openclaw'
+      ? '📚 Awesome OpenClaw registry'
+      : '⚠️ Marketplace offline';
   container.innerHTML = `<p style="text-align:center;color:var(--text-secondary);margin-bottom:8px">${sourceBadge}</p>` + skills.map(s => `
     <div class="marketplace-item">
       <div class="mi-header">

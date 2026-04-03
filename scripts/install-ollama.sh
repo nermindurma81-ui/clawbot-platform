@@ -27,7 +27,10 @@ fi
 
 echo "📥 Pulling free models..."
 
-MODELS=("llama3" "mistral" "phi3" "gemma:2b")
+# Default local stack (best balance for skill-heavy routing + coding):
+# - qwen2.5:7b-instruct => general instruction following
+# - qwen2.5-coder:7b   => coding/automation tasks
+MODELS=("qwen2.5:7b-instruct" "qwen2.5-coder:7b")
 
 for model in "${MODELS[@]}"; do
   echo "  ⬇️  Pulling $model..."

@@ -540,8 +540,8 @@ app.post('/settings/tools', async (req, res) => {
 // Helper functions
 function getDefaultSettings() {
   return {
-    model: 'llama-3.1-8b-instant',
-    provider: CONFIG.defaultProvider,
+    model: 'qwen2.5:7b-instruct',
+    provider: 'ollama',
     theme: 'dark',
     ollama_url: CONFIG.ollama,
     gateway_url: CONFIG.gateway,
@@ -552,7 +552,7 @@ function getDefaultSettings() {
     tools_profile: '',
     enabled_skills: [],
     strict_skill_mode: true,
-    skill_instructions: '',
+    skill_instructions: 'Execute selected skills strictly. Prefer real actions/results over simulation, placeholders, or mock outputs.',
   };
 }
 
@@ -696,7 +696,7 @@ async function chatGemini(message, model, system) {
 
 // ===== Ollama Chat Helper =====
 async function chatOllama(message, model, system) {
-  const ollamaModel = model || 'tinyllama';
+  const ollamaModel = model || 'qwen2.5:7b-instruct';
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 120000);
@@ -1227,6 +1227,9 @@ app.post('/chat', async (req, res) => {
           console.error(`Skill ${matchedSkill.id} error:`, skillErr.message);
         }
       }
+    }
+    if (!matchedSkill && strictSkillMode && skillInstructions) {
+      enhancedSystem = `${enhancedSystem}\n\n[Skill manager default instructions]\n${skillInstructions}`;
     }
 
     let result;
@@ -2046,6 +2049,41 @@ async function installSkillByAnyMethod(skillRef) {
   return { success: false, slug, error: `Failed to install '${slug}'` };
 }
 
+async function fetchAwesomeMarketplaceList(limit = 20) {
+  const collected = [];
+  const seen = new Set();
+  const categorySample = AWESOME_CATEGORIES.slice(0, 8);
+
+  for (const categoryFile of categorySample) {
+    const rawUrl = `https://raw.githubusercontent.com/VoltAgent/awesome-openclaw-skills/main/categories/${categoryFile}`;
+    try {
+      const response = await fetch(rawUrl, { signal: AbortSignal.timeout(10000) });
+      if (!response.ok) continue;
+      const markdown = await response.text();
+      const parsed = parseAwesomeCategorySkills(markdown);
+      for (const entry of parsed) {
+        const slug = String(entry.name || '')
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-+|-+$/g, '');
+        if (!slug || seen.has(slug)) continue;
+        seen.add(slug);
+        collected.push({
+          id: slug,
+          slug,
+          name: entry.name,
+          description: `Imported from Awesome OpenClaw (${categoryFile.replace('.md', '')})`,
+          icon: '🧩',
+          download_url: entry.url,
+          installed: !!loadedSkills[slug],
+        });
+        if (collected.length >= limit) return collected;
+      }
+    } catch {}
+  }
+  return collected;
+}
+
 app.get('/marketplace', async (req, res) => {
   const query = req.query.q || '';
   const limit = parseInt(req.query.limit) || 20;
@@ -2055,19 +2093,21 @@ app.get('/marketplace', async (req, res) => {
     if (skills.length) {
       return res.json({ skills, source: 'clawhub' });
     }
-    throw new Error('Marketplace unavailable or empty response');
+    const awesome = await fetchAwesomeMarketplaceList(limit);
+    if (awesome.length) {
+      return res.status(206).json({
+        skills: awesome,
+        source: 'awesome-openclaw',
+        warning: 'ClawHub unavailable, showing live Awesome OpenClaw index.',
+      });
+    }
+    throw new Error('Marketplace unavailable and no live fallback sources responded');
   } catch (err) {
-    // Transparent fallback: return local skills but mark response as degraded
-    const skills = Object.entries(loadedSkills).map(([id, s]) => ({
-      id, name: s.name || id, description: s.description || '',
-      slug: id,
-      icon: s.icon || '🔧', triggers: s.triggers || [], installed: true,
-    }));
     res.status(502).json({
       error: 'Marketplace temporarily unavailable',
       details: err.message,
-      source: 'local-fallback',
-      skills,
+      source: 'offline',
+      skills: [],
     });
   }
 });

@@ -89,18 +89,19 @@ npm start
 
 | Model | Size | Best For |
 |-------|------|----------|
-| llama3 | 4.7GB | General chat |
-| mistral | 4.1GB | Fast responses |
-| phi3 | 2.2GB | Lightweight |
-| gemma:2b | 1.7GB | Ultra-fast |
+| qwen2.5:7b-instruct | ~4.7GB | Default assistant, strong instruction following |
+| qwen2.5-coder:7b | ~4.7GB | Coding, automation, debugging |
 
 ```bash
 # Pull a model
-ollama pull llama3
+ollama pull qwen2.5:7b-instruct
+ollama pull qwen2.5-coder:7b
 
 # List installed
 ollama list
 ```
+
+Skill execution defaults are strict: when a skill is selected, the assistant prioritizes executing that skill with real outputs (not mock/simulated placeholders).
 
 ## Railway Deployment
 
