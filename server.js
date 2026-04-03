@@ -76,6 +76,16 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Fast health endpoint for Railway/LB checks (no upstream dependencies).
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    ok: true,
+    service: 'clawbot-platform',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // ===== Supabase Auth Middleware =====
 let supabase = null;
 let supabaseAdmin = null;
@@ -1221,9 +1231,6 @@ app.post('/chat', async (req, res) => {
 
     let result;
     const chatMessage = skillResult?.instructions ? skillResult.instructions : message;
-    if (!matchedSkill && strictSkillMode && skillInstructions) {
-      enhancedSystem = `${enhancedSystem}\n\n[Skill manager default instructions]\n${skillInstructions}`;
-    }
 
     // Skill can override model (e.g. knowledge uses 70B)
     const chatModel = skillResult?.model || model;
@@ -1341,6 +1348,9 @@ app.post('/chat/stream', async (req, res) => {
           if (skillResult.model) chatModel = skillResult.model;
         } catch {}
       }
+    }
+    if (!matchedSkill && strictSkillMode && skillInstructions) {
+      enhancedSystem = `${enhancedSystem}\n\n[Skill manager default instructions]\n${skillInstructions}`;
     }
 
     // Track model usage
@@ -2585,7 +2595,7 @@ server.listen(PORT, '0.0.0.0', () => {
 ║  Groq:     ${(getProviderToken('groq') ? '✅ configured' : '❌ not set').padEnd(37)}║
 ║  Gemini:   ${(getProviderToken('gemini') ? '✅ configured' : '❌ not set').padEnd(37)}║
 ║  HuggFace: ${(getHfToken() ? '✅ ' + Object.keys(getHfModelCatalog()).length + ' models available' : '❌ not set').padEnd(37)}║
-║  Health:   http://localhost:${PORT}/status          ║
+║  Health:   http://localhost:${PORT}/health          ║
 ╚══════════════════════════════════════════════════╝
   `);
 });
@@ -2594,6 +2604,3 @@ process.on('SIGTERM', () => {
   console.log('Shutting down...');
   server.close(() => process.exit(0));
 });
-    if (!matchedSkill && strictSkillMode && skillInstructions) {
-      enhancedSystem = `${enhancedSystem}\n\n[Skill manager default instructions]\n${skillInstructions}`;
-    }
