@@ -691,7 +691,7 @@ async function chatHuggingFace(message, model, system) {
   const timeout = setTimeout(() => controller.abort(), 60000);
 
   const res = await fetch(
-    `https://api-inference.huggingface.co/models/${hfModel}/v1/chat/completions`,
+    `https://router.huggingface.co/hf-inference/models/${hfModel}/v1/chat/completions`,
     {
       method: 'POST',
       headers: {
@@ -741,7 +741,7 @@ async function streamHuggingFace(message, model, system, res, history) {
   messages.push({ role: 'user', content: message });
 
   const hfRes = await fetch(
-    `https://api-inference.huggingface.co/models/${hfModel}/v1/chat/completions`,
+    `https://router.huggingface.co/hf-inference/models/${hfModel}/v1/chat/completions`,
     {
       method: 'POST',
       headers: {
