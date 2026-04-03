@@ -351,8 +351,9 @@ app.get('/settings', async (req, res) => {
 
 // Save user settings
 app.post('/settings', async (req, res) => {
-  const settings = req.body;
-  if (!settings) return res.status(400).json({ error: 'No settings provided' });
+  const incoming = req.body;
+  if (!incoming) return res.status(400).json({ error: 'No settings provided' });
+  const settings = { ...getDefaultSettings(), ...getLocalSettings(), ...incoming };
 
   // Always save locally
   saveLocalSettings(settings);
@@ -488,6 +489,44 @@ app.post('/settings/memory', async (req, res) => {
   res.json({ success: true, message: '✅ Memory saved & synced!' });
 });
 
+app.post('/settings/agent', async (req, res) => {
+  const { content } = req.body || {};
+  if (!content || typeof content !== 'string') return res.status(400).json({ error: 'No agent content' });
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(path.join(DATA_DIR, 'agent.md'), content.trim());
+  agentCache = content.trim();
+  const merged = mergeAndSaveLocalSettings({ agent_profile: agentCache });
+  if (supabase && req.user) {
+    try {
+      await (supabaseAdmin || supabase).from('user_settings').upsert({
+        user_id: req.user.id,
+        settings: merged,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+    } catch {}
+  }
+  res.json({ success: true, message: '✅ Agent profile saved' });
+});
+
+app.post('/settings/tools', async (req, res) => {
+  const { content } = req.body || {};
+  if (!content || typeof content !== 'string') return res.status(400).json({ error: 'No tools content' });
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(path.join(DATA_DIR, 'tools.md'), content.trim());
+  toolsCache = content.trim();
+  const merged = mergeAndSaveLocalSettings({ tools_profile: toolsCache });
+  if (supabase && req.user) {
+    try {
+      await (supabaseAdmin || supabase).from('user_settings').upsert({
+        user_id: req.user.id,
+        settings: merged,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+    } catch {}
+  }
+  res.json({ success: true, message: '✅ Tools profile saved' });
+});
+
 // Helper functions
 function getDefaultSettings() {
   return {
@@ -499,6 +538,8 @@ function getDefaultSettings() {
     system_prompt: '',
     soul: '',
     memory: '',
+    agent_profile: '',
+    tools_profile: '',
     enabled_skills: [],
     strict_skill_mode: true,
     skill_instructions: '',
@@ -1140,6 +1181,8 @@ app.post('/chat', async (req, res) => {
     if (memoryCache) {
       enhancedSystem = `${enhancedSystem}\n\n[Memory - Context]\n${memoryCache.substring(0, 2000)}`;
     }
+    if (agentCache) enhancedSystem = `${enhancedSystem}\n\n[Agent Profile]\n${agentCache.substring(0, 2000)}`;
+    if (toolsCache) enhancedSystem = `${enhancedSystem}\n\n[Tools]\n${toolsCache.substring(0, 2000)}`;
     const selectedSkillsContext = buildSelectedSkillsContext(allowedSkills);
     if (selectedSkillsContext) enhancedSystem = `${enhancedSystem}\n\n${selectedSkillsContext}`;
 
@@ -1265,6 +1308,8 @@ app.post('/chat/stream', async (req, res) => {
     let enhancedSystem = system || '';
     if (soulCache) enhancedSystem = `[Bot Personality]\n${soulCache}\n\n${enhancedSystem}`;
     if (memoryCache) enhancedSystem = `${enhancedSystem}\n\n[Memory]\n${memoryCache.substring(0, 2000)}`;
+    if (agentCache) enhancedSystem = `${enhancedSystem}\n\n[Agent Profile]\n${agentCache.substring(0, 2000)}`;
+    if (toolsCache) enhancedSystem = `${enhancedSystem}\n\n[Tools]\n${toolsCache.substring(0, 2000)}`;
     const selectedSkillsContext = buildSelectedSkillsContext(allowedSkills);
     if (selectedSkillsContext) enhancedSystem = `${enhancedSystem}\n\n${selectedSkillsContext}`;
 
@@ -1652,32 +1697,33 @@ app.post('/skills/share', async (req, res) => {
 // ===== Models Endpoint =====
 app.get('/models', async (req, res) => {
   const models = [];
+  const catalogProviders = ['groq', 'cerebras', 'mistral', 'siliconflow', 'gemini', 'huggingface', 'llm7'];
+  for (const providerId of catalogProviders) {
+    const catalog = getProviderModelCatalog(providerId);
+    for (const [id, info] of Object.entries(catalog)) {
+      models.push({ name: id, model: id, provider: providerId, size: info.size || 0 });
+    }
+  }
 
-  // Ollama models
   try {
     const ollamaRes = await fetch(`${CONFIG.ollama}/api/tags`, { signal: AbortSignal.timeout(5000) });
     const data = await ollamaRes.json();
-    if (data.models) models.push(...data.models);
-  } catch { /* Ollama offline */ }
+    if (Array.isArray(data.models)) {
+      for (const m of data.models) {
+        models.push({ name: m.name, model: m.name, provider: 'ollama', size: m.size || 0 });
+      }
+    }
+  } catch {}
 
-  // Groq models (if configured)
-  if (CONFIG.groqKey) {
-    models.push(
-      { name: 'llama-3.1-8b-instant', model: 'llama-3.1-8b-instant', provider: 'groq', size: 0 },
-      { name: 'llama-3.1-70b-versatile', model: 'llama-3.1-70b-versatile', provider: 'groq', size: 0 },
-      { name: 'mixtral-8x7b-32768', model: 'mixtral-8x7b-32768', provider: 'groq', size: 0 },
-    );
+  const dedup = [];
+  const seen = new Set();
+  for (const m of models) {
+    const key = `${m.provider}:${m.model}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    dedup.push(m);
   }
-
-  // Gemini models (if configured)
-  if (CONFIG.geminiKey) {
-    models.push(
-      { name: 'gemini-1.5-flash', model: 'gemini-1.5-flash', provider: 'gemini', size: 0 },
-      { name: 'gemini-1.5-pro', model: 'gemini-1.5-pro', provider: 'gemini', size: 0 },
-    );
-  }
-
-  res.json({ models });
+  res.json({ models: dedup });
 });
 
 // ===== Status =====
@@ -2390,15 +2436,37 @@ app.post('/upload/memory', (req, res) => {
   res.json({ success: true, message: '✅ Memory updated!' });
 });
 
+app.post('/upload/agent', (req, res) => {
+  const { content } = req.body || {};
+  if (!content || typeof content !== 'string') return res.status(400).json({ error: 'No AGENT content provided' });
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(path.join(DATA_DIR, 'agent.md'), content.trim());
+  agentCache = content.trim();
+  res.json({ success: true, message: '✅ AGENT profile installed' });
+});
+
+app.post('/upload/tools', (req, res) => {
+  const { content } = req.body || {};
+  if (!content || typeof content !== 'string') return res.status(400).json({ error: 'No TOOLS content provided' });
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(path.join(DATA_DIR, 'tools.md'), content.trim());
+  toolsCache = content.trim();
+  res.json({ success: true, message: '✅ TOOLS profile installed' });
+});
+
 // Get current config
 app.get('/config', (req, res) => {
   const soul = soulCache ? soulCache.substring(0, 300) : null;
   const memory = memoryCache ? memoryCache.substring(0, 300) : null;
+  const agent = agentCache ? agentCache.substring(0, 300) : null;
+  const tools = toolsCache ? toolsCache.substring(0, 300) : null;
   const skillCount = Object.keys(loadedSkills).length;
 
   res.json({
     soul: soul ? { loaded: true, preview: soul + '...' } : { loaded: false },
     memory: memory ? { loaded: true, preview: memory + '...' } : { loaded: false },
+    agent: agent ? { loaded: true, preview: agent + '...' } : { loaded: false },
+    tools: tools ? { loaded: true, preview: tools + '...' } : { loaded: false },
     skills: { loaded: skillCount, names: Object.keys(loadedSkills) },
     provider: CONFIG.defaultProvider,
     groq: !!getProviderToken('groq'),
@@ -2421,6 +2489,8 @@ app.post('/upload/url', async (req, res) => {
     if (!detectedType) {
       if (url.includes('SOUL') || url.includes('soul')) detectedType = 'soul';
       else if (url.includes('MEMORY') || url.includes('memory')) detectedType = 'memory';
+      else if (url.includes('AGENT') || url.includes('agent')) detectedType = 'agent';
+      else if (url.includes('TOOLS') || url.includes('tools')) detectedType = 'tools';
       else detectedType = 'skill';
     }
 
@@ -2439,6 +2509,16 @@ app.post('/upload/url', async (req, res) => {
       }
       memoryCache = fs.readFileSync(memoryPath, 'utf8');
       res.json({ success: true, type: 'memory', message: '✅ Memory updated from URL!' });
+    } else if (detectedType === 'agent') {
+      if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(path.join(DATA_DIR, 'agent.md'), content.trim());
+      agentCache = content.trim();
+      res.json({ success: true, type: 'agent', message: '✅ Agent profile updated from URL!' });
+    } else if (detectedType === 'tools') {
+      if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(path.join(DATA_DIR, 'tools.md'), content.trim());
+      toolsCache = content.trim();
+      res.json({ success: true, type: 'tools', message: '✅ Tools profile updated from URL!' });
     } else {
       const uploadSkill = loadedSkills['upload'];
       if (!uploadSkill) return res.status(500).json({ error: 'Upload skill not loaded' });
@@ -2454,10 +2534,14 @@ app.post('/upload/url', async (req, res) => {
 // ===== SOUL & MEMORY Loading =====
 let soulCache = null;
 let memoryCache = null;
+let agentCache = null;
+let toolsCache = null;
 
 // Load on startup
 const soulPath = path.join(DATA_DIR, 'soul.md');
 const memoryPath = path.join(DATA_DIR, 'memory.md');
+const agentPath = path.join(DATA_DIR, 'agent.md');
+const toolsPath = path.join(DATA_DIR, 'tools.md');
 if (fs.existsSync(soulPath)) {
   soulCache = fs.readFileSync(soulPath, 'utf8');
   console.log('  💫 SOUL loaded:', soulCache.substring(0, 50) + '...');
@@ -2465,6 +2549,14 @@ if (fs.existsSync(soulPath)) {
 if (fs.existsSync(memoryPath)) {
   memoryCache = fs.readFileSync(memoryPath, 'utf8');
   console.log('  🧠 Memory loaded:', memoryCache.length, 'chars');
+}
+if (fs.existsSync(agentPath)) {
+  agentCache = fs.readFileSync(agentPath, 'utf8');
+  console.log('  🤖 Agent profile loaded');
+}
+if (fs.existsSync(toolsPath)) {
+  toolsCache = fs.readFileSync(toolsPath, 'utf8');
+  console.log('  🧰 Tools profile loaded');
 }
 
 // ===== SPA Fallback =====

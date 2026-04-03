@@ -215,6 +215,7 @@ const PROVIDER_BADGES = {
   huggingface: '🤗 HF',
   ollama:      '🦙 LOCAL',
 };
+let currentStreamController = null;
 
 function getProviderBadge(provider) {
   if (!provider) return '';
@@ -225,6 +226,11 @@ async function sendMessage() {
   const input = document.getElementById('chat-input');
   const message = input.value.trim();
   if (!message || isStreaming) return;
+  if (handleSlashCommand(message)) {
+    input.value = '';
+    hideSlashMenu();
+    return;
+  }
 
   const modelSelect = document.getElementById('model-select');
   const model = modelSelect.value;
@@ -242,6 +248,7 @@ async function sendMessage() {
   addMessage('user', message);
   isStreaming = true;
   document.getElementById('send-btn').disabled = true;
+  document.getElementById('stop-btn')?.classList.remove('hidden');
 
   // Pokaži koji provider se koristi
   const typingId = addTypingIndicator(provider);
@@ -258,6 +265,7 @@ async function sendMessage() {
   });
 
   try {
+    currentStreamController = new AbortController();
     const res = await fetch(`${API}/chat/stream`, {
       method: 'POST',
       headers: {
@@ -270,6 +278,7 @@ async function sendMessage() {
         provider,  // ← ovo je ključno!
         history: chatHistory.slice(-10),
       }),
+      signal: currentStreamController.signal,
     });
 
     removeTypingIndicator(typingId);
@@ -335,12 +344,22 @@ async function sendMessage() {
     saveChatMessage('bot', fullResponse, model);
 
   } catch (err) {
+    if (err.name === 'AbortError') {
+      botContent.innerHTML += '<div class="loading">⏹ Stopped by user.</div>';
+    } else {
     botContent.innerHTML = `<span class="error-text">❌ ${err.message}</span>`;
+    }
   }
 
   isStreaming = false;
+  currentStreamController = null;
   document.getElementById('send-btn').disabled = false;
+  document.getElementById('stop-btn')?.classList.add('hidden');
   input.focus();
+}
+
+function stopStreaming() {
+  if (currentStreamController) currentStreamController.abort();
 }
 
 function addMessage(role, content) {
@@ -407,6 +426,66 @@ function handleChatKey(e) {
     e.preventDefault();
     sendMessage();
   }
+}
+
+function handleSlashCommand(message) {
+  if (!message.startsWith('/')) return false;
+  const [cmd, ...rest] = message.slice(1).split(' ');
+  const arg = rest.join(' ').trim();
+
+  if (cmd === 'model' && arg) {
+    const modelSelect = document.getElementById('model-select');
+    const option = Array.from(modelSelect.options).find(o => o.value.toLowerCase() === arg.toLowerCase());
+    if (!option) {
+      alert(`Model '${arg}' nije pronađen.`);
+      return true;
+    }
+    modelSelect.value = option.value;
+    localStorage.setItem('clawbot_model', option.value);
+    alert(`✅ Model promijenjen na ${option.value}`);
+    return true;
+  }
+  if (cmd === 'skills') {
+    showPanel('skills');
+    return true;
+  }
+  if (cmd === 'stop') {
+    stopStreaming();
+    return true;
+  }
+  if (cmd === 'help') {
+    alert('/model <id>, /skills, /stop, /help');
+    return true;
+  }
+  return false;
+}
+
+function renderSlashMenu(filter = '') {
+  const host = document.getElementById('slash-menu');
+  if (!host) return;
+  const commands = [
+    '/help — list commands',
+    '/skills — open skills panel',
+    '/stop — stop current generation',
+    ...Array.from(document.querySelectorAll('#model-select option')).map(o => `/model ${o.value}`),
+  ];
+  const q = (filter || '').toLowerCase();
+  const visible = commands.filter(c => c.toLowerCase().includes(q)).slice(0, 14);
+  if (!visible.length) return hideSlashMenu();
+  host.innerHTML = visible.map(c => `<div style="padding:6px;cursor:pointer" onclick="applySlashCommand('${c.split(' ')[0]}')">${c}</div>`).join('');
+  host.classList.remove('hidden');
+}
+
+function hideSlashMenu() {
+  document.getElementById('slash-menu')?.classList.add('hidden');
+}
+
+function applySlashCommand(command) {
+  const input = document.getElementById('chat-input');
+  if (!input) return;
+  input.value = `${command} `;
+  hideSlashMenu();
+  input.focus();
 }
 
 function sendQuick(text) {
@@ -968,6 +1047,8 @@ async function loadSettings() {
         if (modelMobileSel) modelMobileSel.value = s.model;
       }
       document.getElementById('setting-system').value = s.system_prompt || '';
+      if (document.getElementById('agent-input')) document.getElementById('agent-input').value = s.agent_profile || '';
+      if (document.getElementById('tools-input')) document.getElementById('tools-input').value = s.tools_profile || '';
       const strictModeEl = document.getElementById('setting-strict-skill-mode');
       if (strictModeEl) strictModeEl.value = s.strict_skill_mode === false ? 'false' : 'true';
       const skillInstEl = document.getElementById('setting-skill-instructions');
@@ -1085,6 +1166,8 @@ async function loadConfig() {
     const data = await res.json();
     document.getElementById('soul-status').textContent = data.soul?.loaded ? '✅ Loaded' : '❌ Not loaded';
     document.getElementById('memory-status').textContent = data.memory?.loaded ? '✅ Loaded' : '❌ Not loaded';
+    document.getElementById('agent-status').textContent = data.agent?.loaded ? '✅ Loaded' : '❌ Not loaded';
+    document.getElementById('tools-status').textContent = data.tools?.loaded ? '✅ Loaded' : '❌ Not loaded';
   } catch {}
 }
 
@@ -1200,6 +1283,30 @@ async function uploadMemory() {
   });
   const data = await res.json();
   if (data.success) { document.getElementById('memory-status').textContent = '✅ Loaded'; document.getElementById('memory-input').value = ''; alert(data.message); }
+}
+
+async function uploadAgent() {
+  const content = document.getElementById('agent-input').value.trim();
+  if (!content) return;
+  const res = await fetch(`${API}/settings/agent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
+    body: JSON.stringify({ content }),
+  });
+  const data = await res.json();
+  if (data.success) { document.getElementById('agent-status').textContent = '✅ Loaded'; document.getElementById('agent-input').value = ''; alert(data.message); }
+}
+
+async function uploadTools() {
+  const content = document.getElementById('tools-input').value.trim();
+  if (!content) return;
+  const res = await fetch(`${API}/settings/tools`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
+    body: JSON.stringify({ content }),
+  });
+  const data = await res.json();
+  if (data.success) { document.getElementById('tools-status').textContent = '✅ Loaded'; document.getElementById('tools-input').value = ''; alert(data.message); }
 }
 
 // ===== Swipe Navigation =====
@@ -1533,4 +1640,10 @@ document.getElementById('skill-md-input')?.addEventListener('keydown', (e) => {
     e.preventDefault();
     installSkillMd();
   }
+});
+
+document.getElementById('chat-input')?.addEventListener('input', (e) => {
+  const value = e.target.value || '';
+  if (value.startsWith('/')) renderSlashMenu(value.slice(1));
+  else hideSlashMenu();
 });

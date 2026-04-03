@@ -156,6 +156,8 @@
           <button class="btn-icon" id="voice-btn" onclick="toggleVoice()" title="Voice input">🎤</button>
           <textarea id="chat-input" placeholder="Type your message..." rows="1" 
             onkeydown="handleChatKey(event)"></textarea>
+          <div id="slash-menu" class="hidden" style="position:absolute;bottom:64px;left:16px;right:16px;background:var(--panel-bg);border:1px solid var(--border-color);border-radius:10px;padding:8px;max-height:180px;overflow:auto;z-index:30"></div>
+          <button class="btn-sm hidden" id="stop-btn" onclick="stopStreaming()" title="Stop generation">⏹ Stop</button>
           <button class="btn-send" onclick="sendMessage()" id="send-btn">➤</button>
         </div>
       </div>
@@ -296,6 +298,18 @@ return { output: 'Hello!' }
               <p id="memory-status">Not loaded</p>
               <textarea id="memory-input" rows="4" placeholder="User preferences, context..."></textarea>
               <button class="btn-sm" onclick="uploadMemory()">Add Memory</button>
+            </div>
+            <div class="config-card">
+              <h4>🤖 AGENT.md</h4>
+              <p id="agent-status">Not loaded</p>
+              <textarea id="agent-input" rows="4" placeholder="Agent behavior rules..."></textarea>
+              <button class="btn-sm" onclick="uploadAgent()">Save Agent</button>
+            </div>
+            <div class="config-card">
+              <h4>🧰 TOOLS.md</h4>
+              <p id="tools-status">Not loaded</p>
+              <textarea id="tools-input" rows="4" placeholder="Allowed tools and usage policy..."></textarea>
+              <button class="btn-sm" onclick="uploadTools()">Save Tools</button>
             </div>
             <div class="config-card" style="margin-top: 16px">
               <h4>📦 Upload Package (ZIP)</h4>
