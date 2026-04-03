@@ -545,7 +545,7 @@ function getDefaultSettings() {
     theme: 'dark',
     ollama_url: CONFIG.ollama,
     gateway_url: CONFIG.gateway,
-    system_prompt: '',
+    system_prompt: 'You are ClawBot. Execute tasks end-to-end with concrete outputs. Prefer actionable results over theory unless the user explicitly asks for explanation.',
     soul: '',
     memory: '',
     agent_profile: '',
@@ -757,11 +757,8 @@ async function chatHuggingFace(message, model, system) {
   if (!hfToken) throw new Error('HUGGINGFACE_TOKEN nije postavljen u Railway Variables');
   const hfCatalog = getHfModelCatalog();
 
-  // Prihvatamo i kratka imena (npr. "Qwen2.5-7B") i puna HF ID-a
   let hfModel = model;
-  if (!model || (!model.includes('/') && !hfCatalog[model])) {
-    hfModel = HF_DEFAULT_MODEL;
-  }
+  if (!model || !hfCatalog[model]) hfModel = HF_DEFAULT_MODEL;
 
   const messages = [];
   if (system) messages.push({ role: 'system', content: system });
@@ -808,7 +805,7 @@ async function streamHuggingFace(message, model, system, res, history) {
   const hfCatalog = getHfModelCatalog();
 
   let hfModel = model;
-  if (!model || (!model.includes('/') && !hfCatalog[model])) hfModel = HF_DEFAULT_MODEL;
+  if (!model || !hfCatalog[model]) hfModel = HF_DEFAULT_MODEL;
 
   const messages = [];
   if (system) messages.push({ role: 'system', content: system });
@@ -891,7 +888,6 @@ const GROQ_MODELS = {
 const CEREBRAS_MODELS = {
   'llama-3.3-70b':  { name: 'Llama 3.3 70B',  speed: '⚡⚡⚡', size: '70B'  },
   'llama3.1-8b':    { name: 'Llama 3.1 8B',   speed: '⚡⚡⚡', size: '8B'   },
-  'qwen-3-32b':     { name: 'Qwen 3 32B',     speed: '⚡⚡',  size: '32B'  },
 };
 
 // ── LLM7 (BEZ API KLJUČA — radi odmah!) ───────────────────────

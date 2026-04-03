@@ -6,6 +6,8 @@ let currentUser = null;
 let currentChatId = null;
 let isStreaming = false;
 let isDarkTheme = localStorage.getItem('clawbot_theme') !== 'light';
+const DEFAULT_OLLAMA_CHAT_MODEL = 'qwen2.5:7b-instruct';
+const DEFAULT_OLLAMA_CODE_MODEL = 'qwen2.5-coder:7b';
 
 // ===== Init =====
 document.addEventListener('DOMContentLoaded', () => {
@@ -220,6 +222,26 @@ let currentStreamController = null;
 function getProviderBadge(provider) {
   if (!provider) return '';
   return PROVIDER_BADGES[provider] || `🤖 ${String(provider).toUpperCase()}`;
+}
+
+function hasModelOption(select, modelId) {
+  return !!Array.from(select?.options || []).find(opt => opt.value === modelId);
+}
+
+function choosePreferredModel(select, requestedModel = '') {
+  const requested = String(requestedModel || '').trim();
+  if (requested && hasModelOption(select, requested)) return requested;
+  if (hasModelOption(select, DEFAULT_OLLAMA_CHAT_MODEL)) return DEFAULT_OLLAMA_CHAT_MODEL;
+  if (hasModelOption(select, DEFAULT_OLLAMA_CODE_MODEL)) return DEFAULT_OLLAMA_CODE_MODEL;
+  return select?.options?.[0]?.value || '';
+}
+
+function applySelectedModel(modelId) {
+  const modelSelect = document.getElementById('model-select');
+  if (!modelSelect || !modelId) return;
+  if (!hasModelOption(modelSelect, modelId)) return;
+  modelSelect.value = modelId;
+  localStorage.setItem('clawbot_model', modelId);
 }
 
 async function sendMessage() {
@@ -776,7 +798,12 @@ async function refreshModels() {
           opt.value = m.name;
           opt.dataset.provider = 'ollama';
           const sizeGB = m.size ? (m.size / 1e9).toFixed(1) + 'GB' : '';
-          opt.textContent = `${m.name} ${sizeGB}`;
+          const defaultBadge = m.name === DEFAULT_OLLAMA_CHAT_MODEL
+            ? '⭐ default chat'
+            : m.name === DEFAULT_OLLAMA_CODE_MODEL
+              ? '🛠 default code'
+              : '';
+          opt.textContent = `${m.name} ${sizeGB} ${defaultBadge}`.trim();
           grp.appendChild(opt);
         });
         select.appendChild(grp);
@@ -822,13 +849,10 @@ async function refreshModels() {
       select.appendChild(opt);
     }
 
-    // Označi trenutno odabrani model iz settingsa
+    // Prefer local default Qwen models, otherwise keep saved value if valid.
     const saved = localStorage.getItem('clawbot_model');
-    if (saved) {
-      for (const opt of select.options) {
-        if (opt.value === saved) { opt.selected = true; break; }
-      }
-    }
+    const selectedModel = choosePreferredModel(select, saved);
+    applySelectedModel(selectedModel);
 
     syncSettingsModelOptions();
 
@@ -858,8 +882,8 @@ function syncSettingsModelOptions() {
   copyOptions(settingsSelect);
   copyOptions(mobileSelect);
 
-  if (settingsSelect && selectedSettingsValue) settingsSelect.value = selectedSettingsValue;
-  if (mobileSelect && selectedMobileValue) mobileSelect.value = selectedMobileValue;
+  if (settingsSelect) settingsSelect.value = choosePreferredModel(settingsSelect, selectedSettingsValue);
+  if (mobileSelect) mobileSelect.value = choosePreferredModel(mobileSelect, selectedMobileValue);
 }
 
 // ===== Status =====
@@ -1040,12 +1064,12 @@ async function loadSettings() {
     if (s) {
       document.getElementById('setting-ollama').value = s.ollama_url || '';
       document.getElementById('setting-gateway').value = s.gateway_url || '';
-      if (s.model) {
-        const modelSel = document.getElementById('setting-model');
-        const modelMobileSel = document.getElementById('setting-model-mobile');
-        if (modelSel) modelSel.value = s.model;
-        if (modelMobileSel) modelMobileSel.value = s.model;
-      }
+      const requestedModel = s.model || localStorage.getItem('clawbot_model') || '';
+      const modelSel = document.getElementById('setting-model');
+      const modelMobileSel = document.getElementById('setting-model-mobile');
+      if (modelSel) modelSel.value = choosePreferredModel(modelSel, requestedModel);
+      if (modelMobileSel) modelMobileSel.value = choosePreferredModel(modelMobileSel, requestedModel);
+      applySelectedModel(choosePreferredModel(document.getElementById('model-select'), requestedModel));
       document.getElementById('setting-system').value = s.system_prompt || '';
       if (document.getElementById('agent-input')) document.getElementById('agent-input').value = s.agent_profile || '';
       if (document.getElementById('tools-input')) document.getElementById('tools-input').value = s.tools_profile || '';
