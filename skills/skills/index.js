@@ -2,8 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 
-const SKILLS_DIR = path.join(__dirname, '..', '..');
-const SKILL_REGISTRY = path.join(__dirname, '..', '..', 'brain', 'skills-registry.json');
+const PROJECT_DIR = path.join(__dirname, '..', '..');
+const SKILLS_DIR = path.join(PROJECT_DIR, 'skills');
+const SKILL_REGISTRY = path.join(PROJECT_DIR, 'brain', 'skills-registry.json');
 const CLAWHUB_API = 'https://registry.clawhub.com/api';
 const GITHUB_RAW = 'https://raw.githubusercontent.com/openclaw/skills/main/skills';
 const SERVER_URL = process.env.SERVER_URL || 'http://localhost:' + (process.env.PORT || 3000);

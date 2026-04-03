@@ -2,8 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 
-const DATA_DIR = path.join(__dirname, '..', '..', 'data');
-const SKILLS_DIR = path.join(__dirname, '..', '..');
+const PROJECT_DIR = path.join(__dirname, '..', '..');
+const DATA_DIR = path.join(PROJECT_DIR, 'data');
+const SKILLS_DIR = path.join(PROJECT_DIR, 'skills');
 const SOUL_PATH = path.join(DATA_DIR, 'soul.md');
 const MEMORY_PATH = path.join(DATA_DIR, 'memory.md');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
@@ -462,7 +463,7 @@ module.exports = SKILL;
 
   registerSkill(slug, meta) {
     try {
-      const registryPath = path.join(SKILLS_DIR, 'brain', 'skills-registry.json');
+      const registryPath = path.join(PROJECT_DIR, 'brain', 'skills-registry.json');
       let registry = {};
       if (fs.existsSync(registryPath)) {
         registry = JSON.parse(fs.readFileSync(registryPath));
