@@ -1279,7 +1279,7 @@ async function uploadMemory() {
   const res = await fetch(`${API}/settings/memory`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
-    body: JSON.stringify({ content, append: true }),
+    body: JSON.stringify({ content, append: false }),
   });
   const data = await res.json();
   if (data.success) { document.getElementById('memory-status').textContent = '✅ Loaded'; document.getElementById('memory-input').value = ''; alert(data.message); }
@@ -1307,6 +1307,31 @@ async function uploadTools() {
   });
   const data = await res.json();
   if (data.success) { document.getElementById('tools-status').textContent = '✅ Loaded'; document.getElementById('tools-input').value = ''; alert(data.message); }
+}
+
+function handleConfigFileUpload(event, type) {
+  const file = event?.target?.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const content = String(e.target?.result || '').trim();
+    if (!content) return;
+    if (type === 'soul') {
+      document.getElementById('soul-input').value = content;
+      await uploadSoul();
+    } else if (type === 'memory') {
+      document.getElementById('memory-input').value = content;
+      await uploadMemory();
+    } else if (type === 'agent') {
+      document.getElementById('agent-input').value = content;
+      await uploadAgent();
+    } else if (type === 'tools') {
+      document.getElementById('tools-input').value = content;
+      await uploadTools();
+    }
+    event.target.value = '';
+  };
+  reader.readAsText(file);
 }
 
 // ===== Swipe Navigation =====

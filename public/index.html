@@ -291,25 +291,41 @@ return { output: 'Hello!' }
               <h4>💫 SOUL.md</h4>
               <p id="soul-status">Not loaded</p>
               <textarea id="soul-input" rows="4" placeholder="You are a friendly assistant..."></textarea>
-              <button class="btn-sm" onclick="uploadSoul()">Save Soul</button>
+              <input type="file" id="soul-file" accept=".md,.txt" style="display:none" onchange="handleConfigFileUpload(event,'soul')">
+              <div style="display:flex;gap:8px">
+                <button class="btn-sm" onclick="uploadSoul()">Save Soul</button>
+                <button class="btn-sm" onclick="document.getElementById('soul-file').click()">Upload File</button>
+              </div>
             </div>
             <div class="config-card">
               <h4>🧠 MEMORY.md</h4>
               <p id="memory-status">Not loaded</p>
               <textarea id="memory-input" rows="4" placeholder="User preferences, context..."></textarea>
-              <button class="btn-sm" onclick="uploadMemory()">Add Memory</button>
+              <input type="file" id="memory-file" accept=".md,.txt" style="display:none" onchange="handleConfigFileUpload(event,'memory')">
+              <div style="display:flex;gap:8px">
+                <button class="btn-sm" onclick="uploadMemory()">Save Memory</button>
+                <button class="btn-sm" onclick="document.getElementById('memory-file').click()">Upload File</button>
+              </div>
             </div>
             <div class="config-card">
               <h4>🤖 AGENT.md</h4>
               <p id="agent-status">Not loaded</p>
               <textarea id="agent-input" rows="4" placeholder="Agent behavior rules..."></textarea>
-              <button class="btn-sm" onclick="uploadAgent()">Save Agent</button>
+              <input type="file" id="agent-file" accept=".md,.txt" style="display:none" onchange="handleConfigFileUpload(event,'agent')">
+              <div style="display:flex;gap:8px">
+                <button class="btn-sm" onclick="uploadAgent()">Save Agent</button>
+                <button class="btn-sm" onclick="document.getElementById('agent-file').click()">Upload File</button>
+              </div>
             </div>
             <div class="config-card">
               <h4>🧰 TOOLS.md</h4>
               <p id="tools-status">Not loaded</p>
               <textarea id="tools-input" rows="4" placeholder="Allowed tools and usage policy..."></textarea>
-              <button class="btn-sm" onclick="uploadTools()">Save Tools</button>
+              <input type="file" id="tools-file" accept=".md,.txt" style="display:none" onchange="handleConfigFileUpload(event,'tools')">
+              <div style="display:flex;gap:8px">
+                <button class="btn-sm" onclick="uploadTools()">Save Tools</button>
+                <button class="btn-sm" onclick="document.getElementById('tools-file').click()">Upload File</button>
+              </div>
             </div>
             <div class="config-card" style="margin-top: 16px">
               <h4>📦 Upload Package (ZIP)</h4>
